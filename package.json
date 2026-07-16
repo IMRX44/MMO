@@ -1,0 +1,23 @@
+{
+  "name": "voxelfall-online",
+  "version": "0.1.0",
+  "description": "VoxelFall Online — a 3D pixel-art web MMO with biomes, dungeons, bosses and server-authoritative gameplay",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "three": "^0.165.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1",
+    "socket.io-client": "^4.8.3"
+  }
+}

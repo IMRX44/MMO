@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoxelFall Online — 3D Pixel MMORPG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{ "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+
+<!-- ══════════ AUTH SCREEN ══════════ -->
+<div id="screen-auth" class="screen active">
+  <div class="bg-anim"></div>
+  <div class="auth-wrap">
+    <h1 class="logo">VOXEL<span>FALL</span></h1>
+    <p class="tagline">A 3D pixel MMORPG in your browser — biomes, dungeons, bosses, loot.</p>
+    <div class="card">
+      <div class="tabs">
+        <button id="tab-login" class="tab active">Login</button>
+        <button id="tab-register" class="tab">Create Account</button>
+      </div>
+      <form id="auth-form" autocomplete="on">
+        <input id="auth-user" type="text" placeholder="Username" maxlength="20" autocomplete="username" required>
+        <input id="auth-pass" type="password" placeholder="Password" maxlength="64" autocomplete="current-password" required>
+        <button id="auth-submit" class="btn-primary" type="submit">Enter World</button>
+      </form>
+      <p id="auth-error" class="error"></p>
+    </div>
+    <div class="feature-row">
+      <div class="feat">⚔️ 4 Classes · 24 Skills</div>
+      <div class="feat">🌋 5 Biomes</div>
+      <div class="feat">💀 Dungeons &amp; Bosses</div>
+      <div class="feat">🎒 Loot &amp; Rarities</div>
+      <div class="feat">👥 Parties &amp; PvP</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ CHARACTER SELECT ══════════ -->
+<div id="screen-charselect" class="screen">
+  <div class="bg-anim"></div>
+  <div class="charselect-wrap">
+    <h2>Choose Your Hero</h2>
+    <div id="char-list" class="char-list"></div>
+    <button id="btn-new-char" class="btn-primary">+ New Character</button>
+    <button id="btn-logout" class="btn-ghost">Log out</button>
+  </div>
+</div>
+
+<!-- ══════════ CHARACTER CREATE ══════════ -->
+<div id="screen-charcreate" class="screen">
+  <div class="bg-anim"></div>
+  <div class="charcreate-wrap">
+    <h2>Forge Your Hero</h2>
+    <div id="class-grid" class="class-grid"></div>
+    <div class="name-row">
+      <input id="char-name" type="text" placeholder="Hero name (3-16 chars)" maxlength="16">
+      <button id="btn-create-char" class="btn-primary">Create &amp; Play</button>
+    </div>
+    <p id="create-error" class="error"></p>
+    <button id="btn-back-select" class="btn-ghost">← Back</button>
+  </div>
+</div>
+
+<!-- ══════════ GAME ══════════ -->
+<div id="screen-game" class="screen">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- top-left: self frame -->
+  <div id="hud-self" class="hud-frame">
+    <div class="hf-name"><span id="hud-name">—</span> <span id="hud-level" class="lvl">1</span></div>
+    <div class="bar hp"><div id="bar-hp" class="fill"></div><span id="txt-hp" class="bar-txt"></span></div>
+    <div class="bar mp"><div id="bar-mp" class="fill"></div><span id="txt-mp" class="bar-txt"></span></div>
+    <div class="bar xp"><div id="bar-xp" class="fill"></div><span id="txt-xp" class="bar-txt"></span></div>
+    <div id="hud-gold">🪙 <span id="txt-gold">0</span></div>
+  </div>
+
+  <!-- target frame -->
+  <div id="hud-target" class="hud-frame hidden">
+    <div class="hf-name"><span id="tgt-name"></span> <span id="tgt-level" class="lvl"></span></div>
+    <div class="bar hp"><div id="tgt-hp" class="fill"></div><span id="tgt-hp-txt" class="bar-txt"></span></div>
+  </div>
+
+  <!-- party frame -->
+  <div id="hud-party" class="hud-party hidden"></div>
+
+  <!-- quest tracker -->
+  <div id="hud-quest" class="hud-quest hidden">
+    <div class="hq-title" id="quest-name"></div>
+    <div class="hq-prog" id="quest-prog"></div>
+  </div>
+
+  <!-- zone banner -->
+  <div id="zone-banner" class="zone-banner"></div>
+
+  <!-- hotbar -->
+  <div id="hotbar" class="hotbar"></div>
+
+  <!-- potions -->
+  <div id="potionbar" class="potionbar">
+    <div class="pslot" data-potion="hpPotion" title="Health Potion [Q]"><span class="picon hp">❤</span><span class="pcount" id="cnt-hp">0</span><span class="pkey">Q</span></div>
+    <div class="pslot" data-potion="mpPotion" title="Mana Potion [E]"><span class="picon mp">✦</span><span class="pcount" id="cnt-mp">0</span><span class="pkey">E</span></div>
+  </div>
+
+  <!-- chat -->
+  <div id="chat">
+    <div id="chat-log"></div>
+    <input id="chat-input" type="text" maxlength="200" placeholder="Press Enter to chat… (/p for party, /invite name)">
+  </div>
+
+  <!-- side buttons -->
+  <div id="menu-buttons">
+    <button data-panel="panel-char" title="Character [C]">🛡️</button>
+    <button data-panel="panel-inv" title="Inventory [B]">🎒</button>
+    <button data-panel="panel-skills" title="Skills [K]">📖</button>
+    <button data-panel="panel-quests" title="Quests [J]">❗</button>
+  </div>
+
+  <!-- dungeon prompt -->
+  <div id="dungeon-prompt" class="dungeon-prompt hidden"></div>
+
+  <!-- death overlay -->
+  <div id="death-overlay" class="death-overlay hidden">
+    <h2>YOU DIED</h2>
+    <p>Respawning in <span id="respawn-timer">5</span>s…</p>
+  </div>
+
+  <!-- panels -->
+  <div id="panel-char" class="panel hidden">
+    <div class="panel-head">Character <button class="panel-close">✕</button></div>
+    <div id="char-sheet"></div>
+  </div>
+  <div id="panel-inv" class="panel hidden">
+    <div class="panel-head">Inventory <button class="panel-close">✕</button></div>
+    <div id="equip-grid"></div>
+    <div id="inv-grid"></div>
+    <div class="vendor-row">
+      <button id="btn-buy-hp" class="btn-small">Buy ❤ Potion (15g)</button>
+      <button id="btn-buy-mp" class="btn-small">Buy ✦ Potion (15g)</button>
+    </div>
+  </div>
+  <div id="panel-skills" class="panel hidden">
+    <div class="panel-head">Skills <button class="panel-close">✕</button></div>
+    <div id="skill-list"></div>
+  </div>
+  <div id="panel-quests" class="panel hidden">
+    <div class="panel-head">Quests <button class="panel-close">✕</button></div>
+    <div id="quest-list"></div>
+  </div>
+
+  <!-- party invite toast -->
+  <div id="party-toast" class="party-toast hidden"></div>
+
+  <!-- tooltip -->
+  <div id="tooltip" class="tooltip hidden"></div>
+
+  <!-- floating announcements -->
+  <div id="announce"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
