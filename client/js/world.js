@@ -1,6 +1,7 @@
 // Chunked low-poly terrain + resource nodes + structures + spawn town.
 // Everything is generated from the same seeded functions the server uses.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   heightAt, groundHeight, biomeAt, decorationAt, resourceAt, structuresNear,
   WATER_LEVEL, TILE, WORLD_SIZE, SPAWN, TOWN_RADIUS, TOWN_HEIGHT, inTown, fbm, WORLD_SEED,
@@ -9,6 +10,39 @@ import { DUNGEONS } from '/shared/constants.js';
 
 const CHUNK = 20;         // tiles per chunk side
 const VIEW_CHUNKS = 4;
+
+// ── environment GLB overrides ────────────────────────────────────────────────
+// Every placeholder built below can be replaced by an AI-generated model at
+// client/models/<name>.glb (see ASSET_PROMPTS.md) with zero code changes.
+// ENV_TUNE fixes scale/rotation/offset per file when a generated model needs it.
+const gltfLoader = new GLTFLoader();
+const envCache = new Map();
+export const ENV_TUNE = {
+  // 'env_wood_t1': { scale: 1.2, rotY: 0, y: 0 },
+};
+function envLoad(name) {
+  if (!envCache.has(name)) {
+    envCache.set(name, new Promise(res =>
+      gltfLoader.load(`/models/${name}.glb`, g => res(g.scene), undefined, () => res(null))));
+  }
+  return envCache.get(name);
+}
+function withEnvOverride(name, group) {
+  envLoad(name).then(scene => {
+    if (!scene) return;
+    const preserved = group.children.filter(c => c.isPointLight || c.userData.keep);
+    group.clear();
+    for (const c of preserved) group.add(c);
+    const clone = scene.clone(true);
+    clone.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    const tune = ENV_TUNE[name] || {};
+    if (tune.scale) clone.scale.setScalar(tune.scale);
+    if (tune.rotY) clone.rotation.y = tune.rotY;
+    if (tune.y) clone.position.y = tune.y;
+    group.add(clone);
+  });
+  return group;
+}
 
 const M = (color, opts = {}) => new THREE.MeshLambertMaterial({ color, ...opts });
 function box(w, h, d, mat, x = 0, y = 0, z = 0) {
@@ -110,10 +144,21 @@ function buildResourceNode(res, tx, tz, h) {
   g.position.set(wx, h, wz);
   g.rotation.y = rot;
   g.userData.node = { tx, tz, kind: res.kind, tier: res.tier };
-  return g;
+  return withEnvOverride(`env_${res.kind}_t${res.tier}`, g);
 }
 
 function buildDecoration(kind, tx, tz, h) {
+  const d = buildDecorationInner(kind, tx, tz, h);
+  if (!d) return null;
+  if (d.isGroup) return withEnvOverride(`env_deco_${kind}`, d);
+  const wrap = new THREE.Group();
+  wrap.position.copy(d.position);
+  d.position.set(0, d.position.y - wrap.position.y, 0);
+  wrap.add(d);
+  return withEnvOverride(`env_deco_${kind}`, wrap);
+}
+
+function buildDecorationInner(kind, tx, tz, h) {
   const wx = tx * TILE, wz = tz * TILE;
   switch (kind) {
     case 'grass': return tuft(MAT.grass, wx, h, wz);
@@ -223,7 +268,7 @@ function buildStructure(s) {
     light.position.y = 1.6;
     fire.add(light);
     fire.position.set(1.5, 0, 1.5);
-    g.add(fire);
+    g.add(withEnvOverride('env_campfire', fire));
   }
   // loot chest at the middle
   const chest = new THREE.Group();
@@ -234,7 +279,7 @@ function buildStructure(s) {
   chest.add(body, lid);
   chest.userData.chest = { key: s.key };
   chest.userData.lid = lid;
-  g.add(chest);
+  g.add(withEnvOverride('env_chest', chest));
   g.position.set(s.x, h, s.z);
   g.userData.structKey = s.key;
   return g;
@@ -256,7 +301,7 @@ function buildTown() {
     hg.add(box(0.8, 0.7, 0.1, M(0x9ecbff), w / 3, 1.6, d / 2 + 0.05)); // window
     hg.position.set(x, y, z);
     hg.rotation.y = rot;
-    return hg;
+    return withEnvOverride('env_house', hg);
   }
 
   // ring of houses
@@ -273,7 +318,7 @@ function buildTown() {
   fountain.add(box(0.8, 1.8, 0.8, MAT.stoneWall, 0, 1.2, 0));
   fountain.add(box(1.6, 0.25, 1.6, MAT.stoneWall, 0, 2.1, 0));
   fountain.position.set(0, y, 0);
-  g.add(fountain);
+  g.add(withEnvOverride('env_fountain', fountain));
 
   // crafting stations: forge + workbench + market stalls
   function stall(x, z, clothMat) {
@@ -283,7 +328,7 @@ function buildTown() {
     const canopy = box(3.0, 0.14, 2.0, clothMat, 0, 2.25, 0); canopy.rotation.x = -0.12;
     st.add(canopy);
     st.position.set(x, y, z);
-    return st;
+    return withEnvOverride('env_stall', st);
   }
   g.add(stall(9, 6, MAT.tent));
   g.add(stall(-9, 6, M(0x4a7fb5)));
@@ -299,7 +344,7 @@ function buildTown() {
   forge.add(box(1.2, 0.5, 0.5, MAT.obsidian, 2.0, 0.75, 0.6));
   forge.add(box(0.5, 0.5, 0.5, MAT.plankDark, 2.0, 0.25, 0.6));
   forge.position.set(-12, y, -8);
-  g.add(forge);
+  g.add(withEnvOverride('env_forge', forge));
 
   // banners around plaza
   for (const [bx, bz] of [[14, 0], [-14, 0], [0, 14], [0, -14]]) {
@@ -308,7 +353,7 @@ function buildTown() {
     const banner = new THREE.Group();
     banner.add(pole, flag);
     banner.position.set(bx, y, bz);
-    g.add(banner);
+    g.add(withEnvOverride('env_banner', banner));
   }
 
   // stone path ring
@@ -436,7 +481,7 @@ export class WorldRenderer {
       portal.add(frame, glow, plight);
       portal.position.set(d.entrance.x, groundHeight(d.entrance.x, d.entrance.z), d.entrance.z);
       portal.userData.dungeonId = key;
-      this.worldObjects.add(portal);
+      this.worldObjects.add(withEnvOverride('env_portal', portal));
     }
   }
 

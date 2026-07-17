@@ -55,7 +55,30 @@ export class GameServer {
     setInterval(() => this.tick(1 / TICK_HZ), 1000 / TICK_HZ);
     setInterval(() => this.broadcast(), 1000 / NET_HZ);
     setInterval(() => markDirty(), 15_000);
+    // suspicion decays for players who behave
+    setInterval(() => {
+      for (const p of this.players.values()) if (p.suspicion > 0) p.suspicion--;
+    }, 60_000);
   }
+
+  // --- anti-cheat: suspicion scoring + clown mode 🤡 ---------------------------
+  // Cheating is *impossible* by design (server simulates everything); these
+  // points track clients sending packets an honest client can never produce.
+  // Instead of banning, we turn cheaters into certified clowns.
+  naughty(p, pts) {
+    p.suspicion = (p.suspicion || 0) + pts;
+    if (p.suspicion >= 25 && !p.clown) this.becomeClown(p);
+  }
+
+  becomeClown(p) {
+    p.clown = true;
+    p.char.clown = true;
+    this.systemMsg(`🎪 ${p.char.name} has been awarded an official CLOWN CERTIFICATE! 🤡 (packets don't lie)`);
+    p.socket.emit('event', { type: 'system', text: '🤡 تبریک! مدرک رسمی دلقکی گرفتی. برای توبه: /redeem (۲۰۰۰ طلا)' });
+    markDirty();
+  }
+
+  static CLUCKS = ['قُدقُد 🐔', 'بوق بوق 🎺', 'من یه دلقک قانونی‌ام 🤡', 'قُدقُدقُدااا 🐔🐔', 'هونک هونک 📯'];
 
   // --- spawning -------------------------------------------------------------
   spawnWorldMobs() {
@@ -133,6 +156,8 @@ export class GameServer {
       partyId: null,
       lastCastAt: 0,
       gatherCd: 0,
+      suspicion: 0,
+      clown: !!char.clown,
       mounted: char.activeMount && char.mounts.includes(char.activeMount) ? char.activeMount : null,
     };
     this.players.set(socket.id, player);
@@ -160,8 +185,10 @@ export class GameServer {
 
   // --- input handlers (called from index.js socket wiring) -------------------
   onInput(p, data) {
-    if (!data || typeof data !== 'object') return;
+    if (!data || typeof data !== 'object') { this.naughty(p, 3); return; }
     let { x = 0, z = 0, face = 0 } = data;
+    if ((x !== undefined && !Number.isFinite(Number(x))) ||
+        (z !== undefined && !Number.isFinite(Number(z)))) this.naughty(p, 3);
     x = Number(x) || 0; z = Number(z) || 0;
     const len = Math.hypot(x, z);
     if (len > 1) { x /= len; z /= len; }
@@ -176,7 +203,7 @@ export class GameServer {
     const cls = CLASSES[p.char.class];
     const slot = Math.floor(Number(data.slot));
     const skill = cls.skills[slot];
-    if (!skill) return;
+    if (!skill) { this.naughty(p, 2); return; } // honest client can't send an invalid slot
     if (p.char.level < skill.unlock) return;
     const sLevel = p.char.skillLevels[skill.id] || 1;
     const cdKey = skill.id;
@@ -479,6 +506,18 @@ export class GameServer {
       this.emitInv(killer);
     }
 
+    // certified clowns get rubber chickens 20% of the time 🐔
+    if (killer.clown && Math.random() < 0.2 && killer.char.inventory.length < INVENTORY_SIZE) {
+      killer.char.inventory.push({
+        id: 'chicken' + Date.now() + Math.floor(Math.random() * 1e4),
+        slot: 'weapon', rarity: 'common', level: 1,
+        name: 'Rubber Chicken 🐔', attack: 1, spell: 1, stats: {}, sellValue: 1,
+        flavor: 'It squeaks. It does nothing else. You know what you did.',
+      });
+      killer.socket.emit('event', { type: 'system', text: '🐔 یه مرغ لاستیکی پیدا کردی! (مخصوص دلقک‌ها)' });
+      this.emitInv(killer);
+    }
+
     // loot roll — only the killer receives the item (personal loot)
     const isBoss = !!mob.isBoss;
     const chance = isBoss ? 1 : DROP_CHANCE;
@@ -575,7 +614,7 @@ export class GameServer {
   onEquip(p, itemId) {
     const inv = p.char.inventory;
     const idx = inv.findIndex(i => i.id === itemId);
-    if (idx === -1) return;
+    if (idx === -1) { this.naughty(p, 1); return; }
     const item = inv[idx];
     if (item.level > p.char.level + 3) return; // can't wear far-above-level gear
     inv.splice(idx, 1);
@@ -652,7 +691,7 @@ export class GameServer {
     const tx = Math.round(Number(data?.tx)), tz = Math.round(Number(data?.tz));
     if (!Number.isFinite(tx) || !Number.isFinite(tz)) return;
     const res = resourceAt(tx, tz);
-    if (!res) return;
+    if (!res) { this.naughty(p, 3); return; } // coordinates that were never a node
     if (Math.hypot(tx * TILE - p.x, tz * TILE - p.z) > GATHER.range) return;
     const key = `${tx},${tz}`;
     let node = this.nodes.get(key);
@@ -682,7 +721,7 @@ export class GameServer {
     const mats = p.char.materials;
     for (const [k, need] of Object.entries(recipe.cost)) {
       const have = k === 'gold' ? p.char.gold : (mats[k] || 0);
-      if (have < need) return;
+      if (have < need) { this.naughty(p, 1); return; } // UI disables this button; hacked clients don't
     }
     for (const [k, need] of Object.entries(recipe.cost)) {
       if (k === 'gold') p.char.gold -= need;
@@ -867,13 +906,42 @@ export class GameServer {
     text = String(text || '').slice(0, 200).trim();
     if (!text) return;
     const t = now();
-    if (p.lastChatAt && t - p.lastChatAt < 0.8) return;
+    if (p.lastChatAt && t - p.lastChatAt < 0.8) { this.naughty(p, 0.5); return; }
     p.lastChatAt = t;
+
+    // clown redemption: pay the fine, lose the nose
+    if (text === '/redeem') {
+      if (!p.clown) return;
+      if (p.char.gold < 2000) {
+        p.socket.emit('event', { type: 'system', text: 'توبه ۲۰۰۰ طلا خرج دارد. برو اسلایم بزن، دلقک عزیز. 🤡' });
+        return;
+      }
+      p.char.gold -= 2000;
+      p.clown = false;
+      p.char.clown = false;
+      p.suspicion = 0;
+      this.systemMsg(`🕊️ ${p.char.name} paid the clown fine and is a citizen again. Welcome back.`);
+      this.emitSelf(p);
+      markDirty();
+      return;
+    }
+
     if (p.partyId && text.startsWith('/p ')) {
       this.partyMsg(p.partyId, `${p.char.name}: ${text.slice(3)}`);
       return;
     }
-    this.io.emit('chat', { from: p.char.name, level: p.char.level, cls: p.char.class, text, channel: 'global' });
+
+    const name = (p.clown ? '🤡 ' : '') + p.char.name;
+    if (p.clown && Math.random() < 0.7) {
+      // the clown sees their own message; everyone else hears clucking
+      const cluck = GameServer.CLUCKS[Math.floor(Math.random() * GameServer.CLUCKS.length)];
+      p.socket.emit('chat', { from: name, level: p.char.level, cls: p.char.class, text, channel: 'global' });
+      for (const other of this.players.values()) {
+        if (other !== p) other.socket.emit('chat', { from: name, level: p.char.level, cls: p.char.class, text: cluck, channel: 'global' });
+      }
+      return;
+    }
+    this.io.emit('chat', { from: name, level: p.char.level, cls: p.char.class, text, channel: 'global' });
   }
 
   systemMsg(text) {
@@ -1164,7 +1232,7 @@ export class GameServer {
     }
     for (const [map, players] of byMap) {
       const playerSnaps = players.map(p => ({
-        id: p.socketId, name: p.char.name, cls: p.char.class, level: p.char.level,
+        id: p.socketId, name: (p.clown ? '🤡 ' : '') + p.char.name, cls: p.char.class, level: p.char.level,
         x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
         hp: Math.round(p.hp), maxHp: p.derived.maxHp,
         dead: p.dead, moving: !!(p.input.x || p.input.z),
