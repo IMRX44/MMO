@@ -123,10 +123,19 @@ async function enterGame(charInfo) {
   }
   game.selfId = r.selfId;
   game.map = r.map;
+  game.pred = { x: r.x, z: r.z, active: true };
   game.world.setMap(r.map, game.scene);
   ui.startGame(r.char, slot => game.cast(slot));
-  ui.chatLine({ from: 'System', channel: 'system', text: `Welcome, ${r.char.name}! WASD move · 1-6 skills · click to target · Tab cycle · F interact · Q/E potions` });
+  ui.chatLine({ from: 'System', channel: 'system', text: `Welcome, ${r.char.name}! WASD move · 1-6 skills · Tab target · F gather/loot/enter · Z mount · V craft · Q/E potions` });
 }
+
+// online counter on landing page
+(async () => {
+  try {
+    const r = await fetch('/api/online').then(r => r.json());
+    document.getElementById('online-count').textContent = `● ${r.online} hero${r.online === 1 ? '' : 'es'} online now`;
+  } catch {}
+})();
 
 // auto-login if token is valid
 (async () => {

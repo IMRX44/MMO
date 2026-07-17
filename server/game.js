@@ -6,14 +6,18 @@ import {
   xpForLevel, MAX_LEVEL, STAT_POINTS_PER_LEVEL, STAT_KEYS,
   skillUpgradeCost, MAX_SKILL_LEVEL, PARTY_XP_RANGE, PARTY_XP_BONUS,
   PVP_BIOME, INVENTORY_SIZE, RESPEC_COST,
+  GATHER, RECIPES, MOUNTS, CHESTS,
 } from '../shared/constants.js';
-import { biomeAt, groundHeight, clampToWorld, HALF_WORLD, TILE, WATER_LEVEL, BIOMES, SPAWN } from '../shared/worldgen.js';
+import {
+  biomeAt, groundHeight, clampToWorld, HALF_WORLD, TILE, WATER_LEVEL, BIOMES,
+  SPAWN, TOWN_RADIUS, inTown, walkable, resourceAt, structuresNear,
+} from '../shared/worldgen.js';
 import { derivedStats, skillPower, armorReduction } from './stats.js';
 import { rollItem, DROP_CHANCE } from './items.js';
 import { markDirty } from './db.js';
 
 const TICK_HZ = 20;
-const NET_HZ = 10;
+const NET_HZ = 15;
 const VIEW_RADIUS = 90;
 const MOB_SLEEP_RADIUS = 70;
 const LEASH_RANGE = 45;
@@ -42,6 +46,8 @@ export class GameServer {
     this.nextMobId = 1;
     this.nextPartyId = 1;
     this.pendingInvites = new Map(); // targetSocketId -> { from, partyId, at }
+    this.nodes = new Map();          // "tx,tz" -> { uses, respawnAt }  (resource nodes)
+    this.chests = new Map();         // structure key -> openedAt
 
     this.spawnWorldMobs();
     for (const dk of Object.keys(DUNGEONS)) this.spawnDungeonMobs(dk);
@@ -62,7 +68,7 @@ export class GameServer {
         const b = biomeAt(x / TILE, z / TILE);
         if (BIOMES[tpl.biome].id !== b.id) continue;
         if (groundHeight(x, z) <= WATER_LEVEL + 0.3) continue;
-        if (Math.hypot(x - SPAWN.x, z - SPAWN.z) < 25) continue; // keep spawn area safe
+        if (Math.hypot(x - SPAWN.x, z - SPAWN.z) < TOWN_RADIUS + 15) continue; // town is safe
         this.addMob(key, tpl, 'world', x, z);
         placed++;
       }
@@ -106,6 +112,10 @@ export class GameServer {
     for (const p of this.players.values()) {
       if (p.charId === charId) return { error: 'Character already in game.' };
     }
+    // migrate older characters to v2 fields
+    char.materials ??= {};
+    char.mounts ??= [];
+    char.activeMount ??= null;
     const d = derivedStats(char);
     const player = {
       socket, socketId: socket.id, username, charId, char,
@@ -122,6 +132,8 @@ export class GameServer {
       dead: false, respawnAt: 0,
       partyId: null,
       lastCastAt: 0,
+      gatherCd: 0,
+      mounted: char.activeMount && char.mounts.includes(char.activeMount) ? char.activeMount : null,
     };
     this.players.set(socket.id, player);
     this.systemMsg(`${char.name} entered the world.`);
@@ -176,6 +188,7 @@ export class GameServer {
     const point = data.point && Number.isFinite(+data.point.x) && Number.isFinite(+data.point.z)
       ? { x: +data.point.x, z: +data.point.z } : null;
 
+    if (p.mounted) this.setMount(p, null); // casting dismounts
     const ok = this.executeSkill(p, skill, sLevel, target, point);
     if (!ok) return;
     p.mp -= skill.mp;
@@ -400,6 +413,7 @@ export class GameServer {
 
   hurtPlayer(victim, dmg, sourceName, crit = false) {
     if (victim.dead) return;
+    if (victim.mounted) this.setMount(victim, null); // knocked off your mount
     if (victim.shield > 0 && victim.shieldUntil > now()) {
       const absorbed = Math.min(victim.shield, dmg);
       victim.shield -= absorbed;
@@ -453,6 +467,16 @@ export class GameServer {
       m.char.gold += goldEach;
       this.progressQuest(m, mob);
       this.emitSelf(m);
+    }
+
+    // beasts drop hide of their biome tier (Albion skinning)
+    if (mob.tpl.beast) {
+      const tier = BIOMES[mob.tpl.biome]?.tier || 1;
+      const key = `hide${tier}`;
+      const qty = ri(1, 2);
+      killer.char.materials[key] = (killer.char.materials[key] || 0) + qty;
+      killer.socket.emit('event', { type: 'gathered', mat: key, qty });
+      this.emitInv(killer);
     }
 
     // loot roll — only the killer receives the item (personal loot)
@@ -620,6 +644,115 @@ export class GameServer {
     markDirty();
   }
 
+  // --- gathering / crafting / mounts / chests -----------------------------------
+  onGather(p, data) {
+    if (p.dead || p.map !== 'world') return;
+    const t = now();
+    if (p.gatherCd > t) return;
+    const tx = Math.round(Number(data?.tx)), tz = Math.round(Number(data?.tz));
+    if (!Number.isFinite(tx) || !Number.isFinite(tz)) return;
+    const res = resourceAt(tx, tz);
+    if (!res) return;
+    if (Math.hypot(tx * TILE - p.x, tz * TILE - p.z) > GATHER.range) return;
+    const key = `${tx},${tz}`;
+    let node = this.nodes.get(key);
+    if (node && node.respawnAt && t >= node.respawnAt) node = null; // respawned
+    if (!node) { node = { uses: 0, respawnAt: 0 }; this.nodes.set(key, node); }
+    if (node.uses >= GATHER.usesPerNode) return; // depleted
+    node.uses++;
+    p.gatherCd = t + GATHER.cooldown;
+    const matKey = `${res.kind}${res.tier}`;
+    const qty = ri(GATHER.yieldMin, GATHER.yieldMax);
+    p.char.materials[matKey] = (p.char.materials[matKey] || 0) + qty;
+    this.grantXp(p, GATHER.xpPerTier * res.tier);
+    p.socket.emit('event', { type: 'gathered', mat: matKey, qty });
+    if (node.uses >= GATHER.usesPerNode) {
+      node.respawnAt = t + GATHER.respawnSec;
+      node.uses = GATHER.usesPerNode; // stays depleted until respawnAt
+      this.effect('world', { kind: 'nodeDepleted', tx, tz, respawnSec: GATHER.respawnSec });
+      setTimeout(() => { if (this.nodes.get(key) === node) node.uses = 0; }, GATHER.respawnSec * 1000);
+    }
+    this.emitInv(p);
+    markDirty();
+  }
+
+  onCraft(p, recipeId) {
+    const recipe = RECIPES.find(r => r.id === recipeId);
+    if (!recipe || p.dead) return;
+    const mats = p.char.materials;
+    for (const [k, need] of Object.entries(recipe.cost)) {
+      const have = k === 'gold' ? p.char.gold : (mats[k] || 0);
+      if (have < need) return;
+    }
+    for (const [k, need] of Object.entries(recipe.cost)) {
+      if (k === 'gold') p.char.gold -= need;
+      else mats[k] -= need;
+    }
+    const out = recipe.out;
+    if (out.material) {
+      mats[out.material] = (mats[out.material] || 0) + out.qty;
+    } else if (out.potion) {
+      p.char.potions[out.potion] = (p.char.potions[out.potion] || 0) + out.qty;
+    } else if (out.mount) {
+      if (!p.char.mounts.includes(out.mount)) p.char.mounts.push(out.mount);
+    } else if (out.gear) {
+      if (p.char.inventory.length >= INVENTORY_SIZE) return;
+      const g = out.gear;
+      const item = rollItem(g.level, {
+        guaranteed: g.rarityFloor !== 'common' ? g.rarityFloor : undefined,
+        epicChance: g.epicChance, legendaryChance: Math.max(0, g.legendaryChance || 0),
+      }, g.slot);
+      item.crafted = true;
+      p.char.inventory.push(item);
+      p.socket.emit('loot', { item });
+    }
+    p.socket.emit('event', { type: 'crafted', name: recipe.name });
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  setMount(p, mountId) {
+    if (mountId && (!p.char.mounts.includes(mountId) || !MOUNTS[mountId])) return;
+    if (mountId && (p.dead || p.map !== 'world')) return;
+    p.mounted = mountId;
+    p.char.activeMount = mountId;
+    this.emitSelf(p);
+    markDirty();
+  }
+
+  onMount(p, mountId) {
+    this.setMount(p, p.mounted ? null : (mountId || p.char.mounts[0] || null));
+  }
+
+  onOpenChest(p) {
+    if (p.dead || p.map !== 'world') return;
+    const t = now();
+    const structs = structuresNear(p.x, p.z, CHESTS.range + 4);
+    const s = structs.find(s => Math.hypot(s.x - p.x, s.z - p.z) <= CHESTS.range);
+    if (!s) return;
+    const openedAt = this.chests.get(s.key) || 0;
+    if (t - openedAt < CHESTS.respawnSec) return; // still on cooldown
+    this.chests.set(s.key, t);
+    const [g0, g1] = CHESTS.gold(s.tier);
+    const gold = ri(g0, g1);
+    p.char.gold += gold;
+    const kinds = ['wood', 'stone', 'ore', 'fiber', 'hide'];
+    for (let i = 0, n = CHESTS.mats(s.tier); i < n; i++) {
+      const key = `${kinds[ri(0, 4)]}${s.tier}`;
+      p.char.materials[key] = (p.char.materials[key] || 0) + ri(1, 3);
+    }
+    if (Math.random() < CHESTS.itemChance && p.char.inventory.length < INVENTORY_SIZE) {
+      const item = rollItem(s.tier * 6, { guaranteed: 'uncommon', epicChance: 0.05 * s.tier });
+      p.char.inventory.push(item);
+      p.socket.emit('loot', { item });
+    }
+    p.socket.emit('event', { type: 'chest', gold });
+    this.effect('world', { kind: 'chestOpened', key: s.key, x: s.x, z: s.z, respawnSec: CHESTS.respawnSec });
+    this.grantXp(p, 20 * s.tier);
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
   // --- dungeons ----------------------------------------------------------------
   onEnterDungeon(p, dungeonId) {
     const d = DUNGEONS[dungeonId];
@@ -629,6 +762,7 @@ export class GameServer {
       p.socket.emit('event', { type: 'system', text: `Requires level ${d.minLevel}.` });
       return;
     }
+    if (p.mounted) this.setMount(p, null);
     p.map = dungeonId;
     p.x = DUNGEON_LAYOUT.entranceAt.x;
     p.z = DUNGEON_LAYOUT.entranceAt.z;
@@ -781,17 +915,11 @@ export class GameServer {
 
     // movement (server-computed from input intent)
     if (t >= p.stunUntil && (p.input.x || p.input.z)) {
-      let speed = p.derived.speed;
-      if (p.slowUntil > t) speed *= 1 - p.slowPct / 100;
-      const sb = p.buffs.speed;
-      if (sb && sb.until > t) speed *= 1 + sb.pct / 100;
+      const speed = this.effectiveSpeed(p, t);
       let nx = p.x + p.input.x * speed * dt;
       let nz = p.z + p.input.z * speed * dt;
       [nx, nz] = this.clampToMap(p.map, nx, nz);
-      if (p.map === 'world') {
-        // can't walk into deep water
-        if (groundHeight(nx, nz) > WATER_LEVEL - 0.8) { p.x = nx; p.z = nz; }
-      } else { p.x = nx; p.z = nz; }
+      if (p.map !== 'world' || walkable(nx, nz)) { p.x = nx; p.z = nz; }
     }
 
     // regen
@@ -814,6 +942,15 @@ export class GameServer {
     this.tickDots(p, t, dt, true);
 
     if (p.shieldUntil <= t) p.shield = 0;
+  }
+
+  effectiveSpeed(p, t) {
+    let speed = p.derived.speed;
+    if (p.mounted && MOUNTS[p.mounted]) speed *= MOUNTS[p.mounted].speedMult;
+    if (p.slowUntil > t) speed *= 1 - p.slowPct / 100;
+    const sb = p.buffs.speed;
+    if (sb && sb.until > t) speed *= 1 + sb.pct / 100;
+    return speed;
   }
 
   tickDots(e, t, dt, isPlayer) {
@@ -841,12 +978,13 @@ export class GameServer {
 
   tickMob(mob, t, dt) {
     if (mob.dead) {
+      if (mob.noRespawn) { this.mobs.delete(mob.id); return; }
       if (t >= mob.respawnAt) {
         mob.dead = false;
         mob.hp = mob.maxHp;
         mob.x = mob.spawnX; mob.z = mob.spawnZ;
         mob.state = 'idle'; mob.targetId = null;
-        mob.enraged = false; mob.dots = [];
+        mob.enraged = false; mob.addsSpawned = false; mob.dots = [];
       }
       return;
     }
@@ -868,7 +1006,19 @@ export class GameServer {
     if (mob.dead) return;
     if (t < mob.stunUntil) return;
 
-    // boss enrage
+    // boss phases: adds at 70%, enrage at tpl.enrageAt
+    if (mob.isBoss && !mob.addsSpawned && mob.hp / mob.maxHp <= 0.7) {
+      mob.addsSpawned = true;
+      const d = DUNGEONS[mob.dungeon];
+      for (let i = 0; i < 3; i++) {
+        const add = this.addMob(`${mob.dungeon}Add`, d.trash, mob.map, mob.x + ri(-4, 4), mob.z + ri(-4, 4));
+        add.noRespawn = true;
+        add.state = 'chase';
+        add.targetId = mob.targetId;
+      }
+      this.event(mob.map, { type: 'bossAdds', id: mob.id });
+      this.systemMsg(`💀 ${mob.tpl.name} summons reinforcements!`);
+    }
     if (mob.isBoss && !mob.enraged && mob.hp / mob.maxHp <= mob.tpl.enrageAt) {
       mob.enraged = true;
       this.event(mob.map, { type: 'enrage', id: mob.id });
@@ -880,7 +1030,7 @@ export class GameServer {
 
     switch (mob.state) {
       case 'idle': {
-        if (nearDist <= mob.tpl.aggro) {
+        if (nearDist <= mob.tpl.aggro && !(mob.map === 'world' && inTown(nearPlayer.x, nearPlayer.z))) {
           mob.state = 'chase';
           mob.targetId = nearPlayer.socketId;
         } else if (t >= mob.wanderAt) {
@@ -892,7 +1042,8 @@ export class GameServer {
         break;
       }
       case 'chase': {
-        if (!validTarget || dist(mob, { x: mob.spawnX, z: mob.spawnZ }) > LEASH_RANGE) {
+        if (!validTarget || dist(mob, { x: mob.spawnX, z: mob.spawnZ }) > LEASH_RANGE ||
+            (mob.map === 'world' && inTown(target.x, target.z))) {
           mob.state = 'return'; mob.targetId = null;
           break;
         }
@@ -976,6 +1127,8 @@ export class GameServer {
       level: p.char.level, xp: p.char.xp, xpNext: xpForLevel(p.char.level),
       gold: p.char.gold, unspent: p.char.unspentPoints,
       shield: Math.round(p.shield),
+      speed: +this.effectiveSpeed(p, t).toFixed(2),
+      mounted: p.mounted,
       cooldowns: cds,
       dead: p.dead, respawnIn: p.dead ? Math.max(0, +(p.respawnAt - t).toFixed(1)) : 0,
       derived: {
@@ -995,6 +1148,9 @@ export class GameServer {
       skillLevels: p.char.skillLevels,
       statPoints: p.char.statPoints,
       gold: p.char.gold,
+      materials: p.char.materials,
+      mounts: p.char.mounts,
+      activeMount: p.char.activeMount,
     });
   }
 
@@ -1012,7 +1168,7 @@ export class GameServer {
         x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
         hp: Math.round(p.hp), maxHp: p.derived.maxHp,
         dead: p.dead, moving: !!(p.input.x || p.input.z),
-        party: p.partyId,
+        party: p.partyId, mount: p.mounted,
       }));
       const mapMobs = [];
       for (const mob of this.mobs.values()) {

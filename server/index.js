@@ -100,6 +100,10 @@ app.delete('/api/characters/:id', requireAuth, (req, res) => {
 });
 
 // --- leaderboard -----------------------------------------------------------------
+app.get('/api/online', (req, res) => {
+  res.json({ online: game.players.size });
+});
+
 app.get('/api/leaderboard', (req, res) => {
   const top = Object.values(db.characters)
     .sort((a, b) => b.level - a.level || b.xp - a.xp)
@@ -148,6 +152,10 @@ io.on('connection', socket => {
   socket.on('respec',       guard(() => game.onRespec(player)));
   socket.on('upgradeSkill', guard(d => game.onUpgradeSkill(player, String(d?.skillId))));
   socket.on('acceptQuest',  guard(d => game.onAcceptQuest(player, String(d?.questId))));
+  socket.on('gather',       guard(d => game.onGather(player, d)));
+  socket.on('craft',        guard(d => game.onCraft(player, String(d?.recipeId))));
+  socket.on('mount',        guard(d => game.onMount(player, d?.id ? String(d.id) : null)));
+  socket.on('openChest',    guard(() => game.onOpenChest(player)));
   socket.on('enterDungeon', guard(d => game.onEnterDungeon(player, String(d?.id))));
   socket.on('exitDungeon',  guard(() => game.onExitDungeon(player)));
   socket.on('chat',         guard(d => game.onChat(player, d?.text)));

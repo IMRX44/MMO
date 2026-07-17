@@ -130,15 +130,15 @@ export const POTIONS = {
 // ---------------------------------------------------------------------------
 export const MOBS = {
   slime:      { name: 'Gel Slime',      biome: 'PLAINS',   level: 1,  hp: 45,   damage: 5,   xp: 20,  gold: [1, 4],   speed: 3.5, aggro: 7,  range: 1.9, scale: 1.0, model: 'slime' },
-  boar:       { name: 'Tusked Boar',    biome: 'PLAINS',   level: 3,  hp: 85,   damage: 9,   xp: 38,  gold: [2, 6],   speed: 6,   aggro: 9,  range: 2.0, scale: 1.0, model: 'boar' },
-  wolf:       { name: 'Duskwood Wolf',  biome: 'FOREST',   level: 6,  hp: 130,  damage: 14,  xp: 66,  gold: [4, 10],  speed: 8,   aggro: 12, range: 2.2, scale: 1.0, model: 'wolf' },
+  boar:       { name: 'Tusked Boar',    biome: 'PLAINS',   level: 3,  hp: 85,   damage: 9,   xp: 38,  gold: [2, 6],   speed: 6,   aggro: 9,  range: 2.0, scale: 1.0, beast: true, model: 'boar' },
+  wolf:       { name: 'Duskwood Wolf',  biome: 'FOREST',   level: 6,  hp: 130,  damage: 14,  xp: 66,  gold: [4, 10],  speed: 8,   aggro: 12, range: 2.2, scale: 1.0, beast: true, model: 'wolf' },
   treant:     { name: 'Rotbark Treant', biome: 'FOREST',   level: 9,  hp: 240,  damage: 21,  xp: 115, gold: [8, 16],  speed: 3,   aggro: 10, range: 2.6, scale: 1.4, model: 'treant' },
-  scorpion:   { name: 'Dune Scorpion',  biome: 'DESERT',   level: 12, hp: 300,  damage: 27,  xp: 165, gold: [10, 22], speed: 7,   aggro: 11, range: 2.2, scale: 1.1, model: 'scorpion' },
+  scorpion:   { name: 'Dune Scorpion',  biome: 'DESERT',   level: 12, hp: 300,  damage: 27,  xp: 165, gold: [10, 22], speed: 7,   aggro: 11, range: 2.2, scale: 1.1, beast: true, model: 'scorpion' },
   mummy:      { name: 'Sand Mummy',     biome: 'DESERT',   level: 15, hp: 380,  damage: 34,  xp: 230, gold: [14, 30], speed: 4.5, aggro: 10, range: 2.2, scale: 1.1, model: 'mummy' },
-  yeti:       { name: 'Frost Yeti',     biome: 'SNOW',     level: 19, hp: 540,  damage: 44,  xp: 330, gold: [20, 40], speed: 6,   aggro: 12, range: 2.6, scale: 1.5, model: 'yeti' },
+  yeti:       { name: 'Frost Yeti',     biome: 'SNOW',     level: 19, hp: 540,  damage: 44,  xp: 330, gold: [20, 40], speed: 6,   aggro: 12, range: 2.6, scale: 1.5, beast: true, model: 'yeti' },
   iceWraith:  { name: 'Ice Wraith',     biome: 'SNOW',     level: 22, hp: 480,  damage: 52,  xp: 400, gold: [24, 48], speed: 9,   aggro: 14, range: 2.4, scale: 1.1, model: 'wraith' },
   magmaGolem: { name: 'Magma Golem',    biome: 'VOLCANIC', level: 26, hp: 800,  damage: 64,  xp: 540, gold: [30, 60], speed: 4,   aggro: 12, range: 2.8, scale: 1.6, model: 'golem' },
-  ashDemon:   { name: 'Ash Demon',      biome: 'VOLCANIC', level: 30, hp: 720,  damage: 72,  xp: 620, gold: [36, 70], speed: 8,   aggro: 14, range: 2.6, scale: 1.3, model: 'demon' },
+  ashDemon:   { name: 'Ash Demon',      biome: 'VOLCANIC', level: 30, hp: 720,  damage: 72,  xp: 620, gold: [36, 70], speed: 8,   aggro: 14, range: 2.6, scale: 1.3, beast: true, model: 'demon' },
 };
 
 // ---------------------------------------------------------------------------
@@ -147,7 +147,7 @@ export const MOBS = {
 export const DUNGEONS = {
   crypt: {
     name: 'Crypt of the Fallen King', nameFa: 'دخمه‌ی پادشاه سقوط‌کرده',
-    minLevel: 8, entrance: { x: -352, z: 72 },
+    minLevel: 8, entrance: { x: 41, z: 183 },
     trash: { model: 'skeleton', name: 'Risen Skeleton', level: 10, hp: 260, damage: 25, xp: 150, gold: [10, 20], speed: 6, aggro: 14, range: 2.2, scale: 1.0 },
     boss: {
       id: 'boneKing', name: 'Vharok, the Bone King', nameFa: 'وَهاروک، پادشاه استخوانی',
@@ -160,7 +160,7 @@ export const DUNGEONS = {
   },
   forge: {
     name: 'Molten Forge Depths', nameFa: 'اعماق کوره‌ی مذاب',
-    minLevel: 24, entrance: { x: -500, z: 308 },
+    minLevel: 24, entrance: { x: -57, z: -914 },
     trash: { model: 'golem', name: 'Forge Construct', level: 27, hp: 820, damage: 62, xp: 560, gold: [30, 60], speed: 5, aggro: 14, range: 2.6, scale: 1.4 },
     boss: {
       id: 'infernal', name: 'Kargath, Infernal Colossus', nameFa: 'کارگات، کلوسوس دوزخی',
@@ -188,6 +188,91 @@ export const QUESTS = [
   { id: 'q9', name: 'Spirits of Frost',   mob: 'iceWraith',  count: 8,  reward: { xp: 3000, gold: 600 }, minLevel: 21, requires: 'q8' },
   { id: 'q10',name: 'Heart of the Forge', boss: 'infernal',  count: 1,  reward: { xp: 8000, gold: 1500 },minLevel: 24, requires: 'q9' },
 ];
+
+// ---------------------------------------------------------------------------
+// Gathering & Crafting (Albion Online model: gather raws → refine → craft).
+// Raw materials come from world resource nodes; hide comes from beast mobs.
+// Material keys are `${kind}${tier}`, e.g. wood1, bar3, leather5.
+// ---------------------------------------------------------------------------
+export const RAW_KINDS = ['wood', 'stone', 'ore', 'fiber', 'hide'];
+export const REFINED_OF = { wood: 'plank', stone: 'block', ore: 'bar', fiber: 'cloth', hide: 'leather' };
+export const MAT_NAMES = {
+  wood: 'Wood', stone: 'Stone', ore: 'Ore', fiber: 'Fiber', hide: 'Hide',
+  plank: 'Planks', block: 'Stone Blocks', bar: 'Metal Bars', cloth: 'Cloth', leather: 'Leather',
+};
+export const MAT_ICONS = {
+  wood: '🪵', stone: '🪨', ore: '⛏️', fiber: '🌾', hide: '🐾',
+  plank: '📦', block: '🧱', bar: '🔩', cloth: '🧵', leather: '🟤',
+};
+export const MAX_TIER = 5;
+export const GATHER = { range: 7, cooldown: 1.4, yieldMin: 2, yieldMax: 4, usesPerNode: 3, respawnSec: 75, xpPerTier: 8 };
+
+export const MOUNTS = {
+  horse:      { name: 'Riding Horse',  nameFa: 'اسب',          speedMult: 1.6, model: 'horse',      scale: 1.0 },
+  direwolf:   { name: 'Direwolf',      nameFa: 'گرگ وحشی',     speedMult: 1.9, model: 'direwolf',   scale: 1.1 },
+  magmasteed: { name: 'Magma Steed',   nameFa: 'اسب مذاب',     speedMult: 2.3, model: 'magmasteed', scale: 1.15 },
+};
+
+// Recipes: generated tables the UI renders and the server validates.
+function refineRecipes() {
+  const out = [];
+  for (let t = 1; t <= MAX_TIER; t++) {
+    for (const kind of RAW_KINDS) {
+      const ref = REFINED_OF[kind];
+      out.push({
+        id: `${ref}${t}`, group: 'refine', tier: t,
+        name: `T${t} ${MAT_NAMES[ref]}`, icon: MAT_ICONS[ref],
+        cost: { [`${kind}${t}`]: 3 },
+        out: { material: `${ref}${t}`, qty: 1 },
+      });
+    }
+  }
+  return out;
+}
+
+function gearRecipes() {
+  const out = [];
+  const gear = [
+    { slot: 'weapon', name: 'Weapon', icon: '🗡️', cost: t => ({ [`bar${t}`]: 4, [`plank${t}`]: 2 }) },
+    { slot: 'head',   name: 'Helmet', icon: '🪖', cost: t => ({ [`bar${t}`]: 2, [`leather${t}`]: 2 }) },
+    { slot: 'chest',  name: 'Armor',  icon: '🥋', cost: t => ({ [`leather${t}`]: 3, [`cloth${t}`]: 2 }) },
+    { slot: 'legs',   name: 'Leggings', icon: '👖', cost: t => ({ [`leather${t}`]: 2, [`cloth${t}`]: 2 }) },
+    { slot: 'boots',  name: 'Boots',  icon: '🥾', cost: t => ({ [`leather${t}`]: 2, [`block${t}`]: 1 }) },
+    { slot: 'ring',   name: 'Ring',   icon: '💍', cost: t => ({ [`bar${t}`]: 2, [`cloth${t}`]: 1 }) },
+    { slot: 'amulet', name: 'Amulet', icon: '📿', cost: t => ({ [`bar${t}`]: 1, [`cloth${t}`]: 2 }) },
+  ];
+  for (let t = 1; t <= MAX_TIER; t++) {
+    for (const g of gear) {
+      out.push({
+        id: `craft_${g.slot}${t}`, group: 'gear', tier: t,
+        name: `T${t} ${g.name}`, icon: g.icon, slot: g.slot,
+        cost: { ...g.cost(t), gold: 20 * t },
+        out: { gear: { slot: g.slot, level: t * 6, rarityFloor: t >= 4 ? 'rare' : t >= 2 ? 'uncommon' : 'common', epicChance: 0.06 * t, legendaryChance: 0.01 * (t - 2) } },
+      });
+    }
+  }
+  return out;
+}
+
+export const RECIPES = [
+  ...refineRecipes(),
+  ...gearRecipes(),
+  { id: 'brew_hp', group: 'consumable', tier: 1, name: 'Health Potions ×3', icon: '❤️', cost: { fiber1: 3 }, out: { potion: 'hpPotion', qty: 3 } },
+  { id: 'brew_mp', group: 'consumable', tier: 1, name: 'Mana Potions ×3', icon: '💙', cost: { fiber1: 3 }, out: { potion: 'mpPotion', qty: 3 } },
+  { id: 'brew_hp3', group: 'consumable', tier: 3, name: 'Health Potions ×10', icon: '❤️', cost: { fiber3: 4 }, out: { potion: 'hpPotion', qty: 10 } },
+  { id: 'brew_mp3', group: 'consumable', tier: 3, name: 'Mana Potions ×10', icon: '💙', cost: { fiber3: 4 }, out: { potion: 'mpPotion', qty: 10 } },
+  { id: 'mount_horse', group: 'mount', tier: 1, name: 'Riding Horse', icon: '🐴', cost: { leather1: 4, plank1: 4, gold: 200 }, out: { mount: 'horse' } },
+  { id: 'mount_direwolf', group: 'mount', tier: 3, name: 'Direwolf', icon: '🐺', cost: { leather3: 6, bar3: 4, gold: 1500 }, out: { mount: 'direwolf' } },
+  { id: 'mount_magma', group: 'mount', tier: 5, name: 'Magma Steed', icon: '🔥', cost: { bar5: 8, block5: 6, gold: 6000 }, out: { mount: 'magmasteed' } },
+];
+
+// Loot chests inside ruins/camps.
+export const CHESTS = {
+  respawnSec: 300, range: 6,
+  gold: t => [15 * t, 40 * t],
+  mats: t => 2 + Math.floor(Math.random() * 3),
+  itemChance: 0.35,
+};
 
 export const RESPAWN_SECONDS = { mob: 18, boss: 240, player: 5 };
 export const PARTY_XP_RANGE = 40;   // party members within this range share XP

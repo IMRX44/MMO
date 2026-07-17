@@ -268,6 +268,7 @@ export function createModel(name, isPlayerClass) {
   const builder = isPlayerClass ? CLASS_BUILDERS[name] : MOB_BUILDERS[name];
   const placeholder = builder ? builder() : humanoid({});
   root.add(placeholder);
+  root.userData.rig = placeholder;
   root.userData.parts = placeholder.userData.parts;
   root.userData.bounce = placeholder.userData.bounce;
   root.userData.hover = placeholder.userData.hover;
@@ -315,6 +316,69 @@ export function animateRig(root, t, moving, attackT) {
     parts.armL.rotation.x = -swing * 0.8;
     parts.armR.rotation.x = swing * 0.8;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Mounts (Albion-style): quadruped voxel rigs rendered under the rider.
+// ---------------------------------------------------------------------------
+function quadruped({ body, mane, legs, glow }) {
+  const g = new THREE.Group();
+  const bodyMesh = box(2.0, 0.95, 0.95, body, 0, 1.15, 0);
+  const neck = box(0.5, 0.9, 0.5, body, 0, 1.9, 0.85);
+  neck.rotation.x = -0.4;
+  const head = box(0.55, 0.55, 0.9, body, 0, 2.35, 1.25);
+  head.add(box(0.6, 0.28, 0.3, mane, 0, 0.32, -0.25)); // forelock
+  head.add(box(0.14, 0.24, 0.14, mane, -0.2, 0.42, -0.05));
+  head.add(box(0.14, 0.24, 0.14, mane, 0.2, 0.42, -0.05));
+  const maneStrip = box(0.24, 0.5, 1.1, mane, 0, 1.95, 0.35);
+  const tail = box(0.22, 0.9, 0.22, mane, 0, 1.25, -1.15);
+  tail.rotation.x = 0.5;
+  g.add(bodyMesh, neck, head, maneStrip, tail);
+  const legMeshes = [];
+  for (const [x, z] of [[-0.55, 0.65], [0.55, 0.65], [-0.55, -0.65], [0.55, -0.65]]) {
+    const leg = box(0.28, 1.0, 0.28, legs, x, 0.5, z);
+    leg.geometry.translate(0, -0.4, 0);
+    leg.position.y += 0.4;
+    g.add(leg);
+    legMeshes.push(leg);
+  }
+  if (glow) {
+    const gm = new THREE.MeshLambertMaterial({ color: glow, emissive: glow, emissiveIntensity: 0.8 });
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.15, 0.97), gm);
+    strip.position.set(0, 1.15, 0);
+    g.add(strip);
+    for (const l of legMeshes) {
+      const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.3), gm);
+      hoof.position.set(0, -0.85, 0);
+      l.add(hoof);
+    }
+  }
+  // saddle
+  g.add(box(0.8, 0.16, 0.9, 0x6b4226, 0, 1.7, -0.1));
+  g.userData.animate = (t, moving) => {
+    const swing = moving ? Math.sin(t * 11) * 0.8 : 0;
+    legMeshes[0].rotation.x = swing;
+    legMeshes[1].rotation.x = -swing;
+    legMeshes[2].rotation.x = -swing;
+    legMeshes[3].rotation.x = swing;
+    tail.rotation.x = 0.5 + Math.sin(t * 3) * 0.15;
+  };
+  return g;
+}
+
+const MOUNT_BUILDERS = {
+  horse: () => quadruped({ body: 0x8d6748, mane: 0x4a3220, legs: 0x6e4f36 }),
+  direwolf: () => quadruped({ body: 0x5d6d7e, mane: 0x2c3e50, legs: 0x46586a }),
+  magmasteed: () => quadruped({ body: 0x3a2b2b, mane: 0x1f1515, legs: 0x2b1d1d, glow: 0xff5722 }),
+};
+
+export function createMount(name) {
+  const builder = MOUNT_BUILDERS[name] || MOUNT_BUILDERS.horse;
+  const m = builder();
+  const wrapper = new THREE.Group();
+  wrapper.add(m);
+  wrapper.userData.animate = m.userData.animate;
+  return wrapper;
 }
 
 export const CLASS_ICONS = { warrior: '⚔️', mage: '🔮', ranger: '🏹', priest: '✨' };

@@ -1,6 +1,9 @@
 // HUD + panels. Renders server-sent self/inventory state; sends intents back.
-import { CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS } from '/shared/constants.js';
-import { biomeAt, TILE } from '/shared/worldgen.js';
+import {
+  CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS,
+  RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS,
+} from '/shared/constants.js';
+import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
 
 const $ = id => document.getElementById(id);
@@ -34,6 +37,16 @@ export class UI {
       if (e.code === 'KeyB') this.togglePanel('panel-inv');
       if (e.code === 'KeyK') this.togglePanel('panel-skills');
       if (e.code === 'KeyJ') this.togglePanel('panel-quests');
+      if (e.code === 'KeyV') this.togglePanel('panel-craft');
+    });
+
+    this.craftGroup = 'refine';
+    document.querySelectorAll('.ctab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.craftGroup = btn.dataset.group;
+        document.querySelectorAll('.ctab').forEach(b => b.classList.toggle('active', b === btn));
+        this.renderCraft();
+      });
     });
 
     // chat
@@ -87,6 +100,7 @@ export class UI {
       if (id === 'panel-inv') this.renderInventory();
       if (id === 'panel-skills') this.renderSkills();
       if (id === 'panel-quests') this.renderQuests();
+      if (id === 'panel-craft') this.renderCraft();
     }
   }
   closePanels() { document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden')); }
@@ -180,6 +194,51 @@ export class UI {
     if (!$('panel-inv').classList.contains('hidden')) this.renderInventory();
     if (!$('panel-skills').classList.contains('hidden')) this.renderSkills();
     if (!$('panel-quests').classList.contains('hidden')) this.renderQuests();
+    if (!$('panel-craft').classList.contains('hidden')) this.renderCraft();
+  }
+
+  onGathered(e) {
+    const kind = e.mat.replace(/\d+$/, '');
+    const tier = e.mat.match(/\d+$/)?.[0] || '';
+    this.announce(`+${e.qty} ${MAT_ICONS[kind] || ''} T${tier} ${MAT_NAMES[kind] || kind}`, '#c9e265');
+  }
+
+  matChip(key, qty) {
+    const kind = key.replace(/\d+$/, '');
+    const tier = key.match(/\d+$/)?.[0] || '';
+    return `<span class="mat-chip" title="T${tier} ${MAT_NAMES[kind]}">${MAT_ICONS[kind] || '❔'}<b>T${tier}</b> ${qty}</span>`;
+  }
+
+  renderCraft() {
+    const list = $('craft-list');
+    if (!list || !this.inv) return;
+    const mats = this.inv.materials || {};
+    const gold = this.inv.gold ?? 0;
+    list.innerHTML = '';
+    for (const r of RECIPES.filter(r => r.group === this.craftGroup)) {
+      if (r.group === 'mount' && this.inv.mounts?.includes(r.out.mount)) continue;
+      let craftable = true;
+      const costHtml = Object.entries(r.cost).map(([k, need]) => {
+        const have = k === 'gold' ? gold : (mats[k] || 0);
+        if (have < need) craftable = false;
+        const kind = k === 'gold' ? 'gold' : k.replace(/\d+$/, '');
+        const icon = k === 'gold' ? '🪙' : (MAT_ICONS[kind] || '');
+        return `<span class="${have >= need ? 'cost-ok' : 'cost-no'}">${icon}${have}/${need}</span>`;
+      }).join(' ');
+      const row = document.createElement('div');
+      row.className = 'craft-row';
+      row.innerHTML = `
+        <div class="cr-icon">${r.icon}</div>
+        <div class="cr-body">
+          <div class="cr-name">${r.name}</div>
+          <div class="cr-cost">${costHtml}</div>
+        </div>
+        <button class="btn-small cr-go" data-id="${r.id}" ${craftable ? '' : 'disabled'}>Craft</button>`;
+      list.appendChild(row);
+    }
+    if (!list.children.length) list.innerHTML = '<div class="tt-muted" style="padding:12px">Nothing to craft here yet.</div>';
+    list.querySelectorAll('.cr-go').forEach(b =>
+      b.addEventListener('click', () => this.net.emit('craft', { recipeId: b.dataset.id })));
   }
 
   onLoot(l) {
@@ -218,6 +277,19 @@ export class UI {
   renderInventory() {
     const inv = this.inv;
     if (!inv) return;
+    const strip = $('mat-strip');
+    const mats = Object.entries(inv.materials || {}).filter(([, q]) => q > 0)
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    strip.innerHTML = mats.length
+      ? mats.map(([k, q]) => this.matChip(k, q)).join('')
+      : '<span class="tt-muted" style="font-size:12px">Gather resources with [F] near trees, rocks, ore veins and plants…</span>';
+    if (inv.mounts?.length) {
+      strip.innerHTML += '<div style="margin-top:6px">' + inv.mounts.map(m =>
+        `<span class="mat-chip ${inv.activeMount === m ? 'mat-active' : ''}" data-mount="${m}">🐴 ${MOUNTS[m]?.name || m}</span>`).join('') +
+        ' <span class="tt-muted" style="font-size:11px">[Z] to ride</span></div>';
+      strip.querySelectorAll('[data-mount]').forEach(el =>
+        el.addEventListener('click', () => this.net.emit('mount', { id: el.dataset.mount })));
+    }
     const eq = $('equip-grid');
     eq.innerHTML = '';
     for (const slot of EQUIP_SLOTS) {
@@ -365,7 +437,7 @@ export class UI {
   // --- zone / dungeon prompts ------------------------------------------------------------
   updateZone(map, x, z) {
     let zone;
-    if (map === 'world') zone = biomeAt(x / TILE, z / TILE).name;
+    if (map === 'world') zone = inTown(x, z) ? '🏰 Havenbrook (Safe Town)' : biomeAt(x / TILE, z / TILE).name;
     else zone = DUNGEONS[map]?.name || map;
     if (zone !== this.lastZone) {
       this.lastZone = zone;
@@ -377,21 +449,28 @@ export class UI {
     }
   }
 
-  updateDungeonPrompt(map, x, z) {
+  updateInteractPrompt(game, x, z) {
     const el = $('dungeon-prompt');
-    if (map !== 'world') {
-      if (Math.hypot(x - 0, z - 0) < 7) {
-        el.classList.remove('hidden');
-        el.innerHTML = `Press <b>[F]</b> to leave the dungeon`;
-      } else el.classList.add('hidden');
+    const show = html => { el.classList.remove('hidden'); if (el.innerHTML !== html) el.innerHTML = html; };
+    if (game.map !== 'world') {
+      if (Math.hypot(x, z) < 7) show(`Press <b>[F]</b> to leave the dungeon`);
+      else el.classList.add('hidden');
       return;
     }
     for (const d of Object.values(DUNGEONS)) {
       if (Math.hypot(x - d.entrance.x, z - d.entrance.z) < 8) {
-        el.classList.remove('hidden');
-        el.innerHTML = `<b>${d.name}</b> (Lv ${d.minLevel}+) — press <b>[F]</b> to enter`;
+        show(`<b>${d.name}</b> (Lv ${d.minLevel}+) — press <b>[F]</b> to enter`);
         return;
       }
+    }
+    const chest = game.world.nearestChest(x, z, CHESTS.range);
+    if (chest) { show(`💰 Loot chest — press <b>[F]</b> to open`); return; }
+    const node = game.world.nearestNode(x, z, GATHER.range);
+    if (node) {
+      const n = node.userData.node;
+      const kind = n.kind;
+      show(`${MAT_ICONS[kind] || ''} T${n.tier} ${MAT_NAMES[kind]} — press <b>[F]</b> to gather`);
+      return;
     }
     el.classList.add('hidden');
   }

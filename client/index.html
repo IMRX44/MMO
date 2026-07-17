@@ -21,7 +21,8 @@
   <div class="bg-anim"></div>
   <div class="auth-wrap">
     <h1 class="logo">VOXEL<span>FALL</span></h1>
-    <p class="tagline">A 3D pixel MMORPG in your browser — biomes, dungeons, bosses, loot.</p>
+    <p class="tagline">A 3D pixel MMORPG in your browser — biomes, dungeons, bosses, crafting, mounts.</p>
+    <p id="online-count"></p>
     <div class="card">
       <div class="tabs">
         <button id="tab-login" class="tab active">Login</button>
@@ -120,6 +121,7 @@
   <div id="menu-buttons">
     <button data-panel="panel-char" title="Character [C]">🛡️</button>
     <button data-panel="panel-inv" title="Inventory [B]">🎒</button>
+    <button data-panel="panel-craft" title="Crafting [V]">🔨</button>
     <button data-panel="panel-skills" title="Skills [K]">📖</button>
     <button data-panel="panel-quests" title="Quests [J]">❗</button>
   </div>
@@ -140,12 +142,23 @@
   </div>
   <div id="panel-inv" class="panel hidden">
     <div class="panel-head">Inventory <button class="panel-close">✕</button></div>
+    <div id="mat-strip"></div>
     <div id="equip-grid"></div>
     <div id="inv-grid"></div>
     <div class="vendor-row">
       <button id="btn-buy-hp" class="btn-small">Buy ❤ Potion (15g)</button>
       <button id="btn-buy-mp" class="btn-small">Buy ✦ Potion (15g)</button>
     </div>
+  </div>
+  <div id="panel-craft" class="panel hidden">
+    <div class="panel-head">Crafting <button class="panel-close">✕</button></div>
+    <div id="craft-tabs" class="craft-tabs">
+      <button data-group="refine" class="ctab active">Refine</button>
+      <button data-group="gear" class="ctab">Gear</button>
+      <button data-group="consumable" class="ctab">Potions</button>
+      <button data-group="mount" class="ctab">Mounts</button>
+    </div>
+    <div id="craft-list"></div>
   </div>
   <div id="panel-skills" class="panel hidden">
     <div class="panel-head">Skills <button class="panel-close">✕</button></div>
