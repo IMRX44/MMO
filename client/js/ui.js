@@ -5,6 +5,7 @@ import {
 } from '/shared/constants.js';
 import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
+import { sfx, setZone, zoneKeyFor, setSfxVolume, setMusicVolume, getSfxVolume, getMusicVolume } from './audio.js';
 
 const $ = id => document.getElementById(id);
 
@@ -38,6 +39,16 @@ export class UI {
       if (e.code === 'KeyK') this.togglePanel('panel-skills');
       if (e.code === 'KeyJ') this.togglePanel('panel-quests');
       if (e.code === 'KeyV') this.togglePanel('panel-craft');
+    });
+
+    // settings sliders
+    const vm = $('vol-music'), vs = $('vol-sfx');
+    vm.value = getMusicVolume(); vs.value = getSfxVolume();
+    vm.addEventListener('input', () => setMusicVolume(+vm.value));
+    vs.addEventListener('input', () => { setSfxVolume(+vs.value); sfx.ui(); });
+    window.addEventListener('keydown', e => {
+      if (document.activeElement?.tagName === 'INPUT') return;
+      if (e.code === 'KeyO') this.togglePanel('panel-settings');
     });
 
     this.craftGroup = 'refine';
@@ -201,6 +212,7 @@ export class UI {
     const kind = e.mat.replace(/\d+$/, '');
     const tier = e.mat.match(/\d+$/)?.[0] || '';
     this.announce(`+${e.qty} ${MAT_ICONS[kind] || ''} T${tier} ${MAT_NAMES[kind] || kind}`, '#c9e265');
+    sfx.gatherDone();
   }
 
   matChip(key, qty) {
@@ -245,6 +257,7 @@ export class UI {
     const r = RARITIES[l.item.rarity];
     this.chatLine({ from: 'Loot', text: `${l.item.name} [${r.name}]`, channel: 'system' });
     this.announce(`+ ${l.item.name}`, r.color);
+    sfx.loot(l.item.rarity);
   }
 
   // --- panels -----------------------------------------------------------------------
@@ -309,7 +322,9 @@ export class UI {
     grid.innerHTML = '';
     for (const item of inv.inventory) {
       const el = document.createElement('div');
-      el.className = 'islot';
+      const eq = inv.equipment[item.slot];
+      const better = this.itemScore(item) > this.itemScore(eq);
+      el.className = 'islot' + (better ? ' better' : '');
       el.dataset.rarity = item.rarity;
       el.innerHTML = this.itemIcon(item);
       el.addEventListener('click', e => {
@@ -331,15 +346,30 @@ export class UI {
     return { weapon: '🗡️', head: '🪖', chest: '🥋', legs: '👖', boots: '🥾', ring: '💍', amulet: '📿' }[item.slot] || '❔';
   }
 
+  itemScore(item) {
+    if (!item) return 0;
+    const s = Object.values(item.stats || {}).reduce((a, b) => a + b, 0);
+    return (item.attack || 0) + (item.spell || 0) + (item.armor || 0) * 1.2 + (item.hp || 0) * 0.25 + s * 1.5;
+  }
+
   showItemTooltip(item, hint) {
     const r = RARITIES[item.rarity];
     const stats = Object.entries(item.stats || {}).map(([k, v]) => `+${v} ${k.toUpperCase()}`).join(' · ');
+    // compare with what's equipped in the same slot
+    const eq = this.inv?.equipment?.[item.slot];
+    let compare = '';
+    if (eq && eq.id !== item.id) {
+      const diff = this.itemScore(item) - this.itemScore(eq);
+      compare = `<div class="${diff >= 0 ? 'tt-diff-up' : 'tt-diff-down'}">${diff >= 0 ? '▲' : '▼'} ${diff >= 0 ? '+' : ''}${Math.round(diff)} vs equipped (${eq.name})</div>`;
+    }
     this.tooltip.innerHTML = `
       <div class="tt-name" style="color:${r.color}">${item.name}</div>
-      <div class="tt-muted">${r.name} ${item.slot} · item level ${item.level}</div>
+      <div class="tt-muted">${r.name} ${item.slot} · item level ${item.level}${item.crafted ? ' · crafted' : ''}</div>
       ${item.attack ? `Attack +${item.attack}<br>` : ''}${item.spell ? `Spell +${item.spell}<br>` : ''}
       ${item.armor ? `Armor +${item.armor}<br>` : ''}${item.hp ? `HP +${item.hp}<br>` : ''}
       ${stats ? `<div>${stats}</div>` : ''}
+      ${item.flavor ? `<div class="tt-muted"><i>${item.flavor}</i></div>` : ''}
+      ${compare}
       <div class="tt-muted">Sell: ${item.sellValue}g · ${hint}</div>`;
     this.tooltip.classList.remove('hidden');
   }
@@ -439,6 +469,7 @@ export class UI {
     let zone;
     if (map === 'world') zone = inTown(x, z) ? '🏰 Havenbrook (Safe Town)' : biomeAt(x / TILE, z / TILE).name;
     else zone = DUNGEONS[map]?.name || map;
+    setZone(zoneKeyFor(map, zone));
     if (zone !== this.lastZone) {
       this.lastZone = zone;
       const b = $('zone-banner');

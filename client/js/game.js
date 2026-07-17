@@ -4,6 +4,8 @@
 import * as THREE from 'three';
 import { WorldRenderer } from './world.js';
 import { createModel, createMount, animateRig } from './models.js';
+import { Minimap } from './minimap.js';
+import { sfx, unlock as unlockAudio } from './audio.js';
 import { DUNGEONS, GATHER, CHESTS, MOUNTS } from '/shared/constants.js';
 import { walkable, clampToWorld, inTown } from '/shared/worldgen.js';
 
@@ -54,6 +56,9 @@ export class GameClient {
     this.world = new WorldRenderer(this.scene);
     this.world.setMap('world', this.scene);
 
+    this.minimap = new Minimap(document.getElementById('minimap'), document.getElementById('worldmap'));
+    this.touchMove = null;
+
     this.raycaster = new THREE.Raycaster();
     this.bindInput(canvas);
     this.resize();
@@ -77,9 +82,13 @@ export class GameClient {
 
   // --- input -----------------------------------------------------------------
   bindInput(canvas) {
+    window.addEventListener('mousedown', unlockAudio, { once: true });
+    window.addEventListener('keydown', unlockAudio, { once: true });
+    window.addEventListener('touchstart', unlockAudio, { once: true });
     window.addEventListener('keydown', e => {
       if (document.activeElement?.tagName === 'INPUT') return;
       this.keys[e.code] = true;
+      if (e.code === 'KeyM') this.minimap.toggleBig();
       const slotKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'];
       const idx = slotKeys.indexOf(e.code);
       if (idx >= 0) this.cast(idx);
@@ -175,6 +184,7 @@ export class GameClient {
       const n = node.userData.node;
       this.net.emit('gather', { tx: n.tx, tz: n.tz });
       this.spawnGatherFx(node);
+      (n.kind === 'wood' || n.kind === 'fiber') ? sfx.chop() : sfx.mine();
     }
   }
 
@@ -307,40 +317,45 @@ export class GameClient {
         const ent = this.entities.get(e.targetId);
         if (ent) this.spawnDamageNumber(ent, e.amount, e.crit ? '#ffd54f' : '#ffffff', e.crit);
         if (e.targetId === this.selfId) this.ui.flashHurt();
+        e.crit ? sfx.crit() : sfx.hit();
         break;
       }
       case 'healed': {
         const ent = this.entities.get(e.targetId);
-        if (ent && e.amount > 0) this.spawnDamageNumber(ent, '+' + e.amount, '#7cffb2', false);
+        if (ent && e.amount > 0) { this.spawnDamageNumber(ent, '+' + e.amount, '#7cffb2', false); sfx.heal(); }
         break;
       }
       case 'gathered': this.ui.onGathered(e); break;
-      case 'crafted': this.ui.announce(`Crafted: ${e.name}`, '#7cffb2'); break;
-      case 'chest': this.ui.announce(`+${e.gold} gold from chest!`, '#f5c542'); break;
+      case 'crafted': this.ui.announce(`Crafted: ${e.name}`, '#7cffb2'); sfx.gatherDone(); break;
+      case 'chest': this.ui.announce(`+${e.gold} gold from chest!`, '#f5c542'); sfx.chest(); break;
       case 'xp': this.ui.announceXp(e.amount); break;
       case 'levelup': {
         const ent = this.entities.get(e.id);
         if (ent) this.spawnLevelUpFx(ent);
-        if (e.id === this.selfId) this.ui.announce(`LEVEL ${e.level}!`);
+        if (e.id === this.selfId) { this.ui.announce(`LEVEL ${e.level}!`); sfx.levelup(); }
         break;
       }
       case 'mobDeath': {
         const ent = this.entities.get(e.id);
         if (ent) this.spawnDeathFx(ent);
         if (this.targetId === e.id) this.setTarget(null);
+        sfx.mobDeath();
         break;
       }
-      case 'playerDeath': if (e.id === this.selfId) this.ui.showDeath(); break;
-      case 'bossTelegraph': this.spawnTelegraph(e.at, e.radius, e.sec); break;
-      case 'bossAdds': this.ui.announce('REINFORCEMENTS!', '#ff9800'); break;
-      case 'enrage': this.ui.announce('BOSS ENRAGED!', '#ff5b4d'); break;
-      case 'questComplete': this.ui.announce(`Quest Complete: ${e.name}`); break;
+      case 'playerDeath': if (e.id === this.selfId) { this.ui.showDeath(); sfx.playerDeath(); } break;
+      case 'bossTelegraph': this.spawnTelegraph(e.at, e.radius, e.sec); sfx.telegraph(); break;
+      case 'bossAdds': this.ui.announce('REINFORCEMENTS!', '#ff9800'); sfx.enrage(); break;
+      case 'enrage': this.ui.announce('BOSS ENRAGED!', '#ff5b4d'); sfx.enrage(); break;
+      case 'questComplete': this.ui.announce(`Quest Complete: ${e.name}`); sfx.quest(); break;
       case 'system': this.ui.chatLine({ from: 'System', text: e.text, channel: 'system' }); break;
     }
   }
 
   onFx(e) {
-    if (e.kind === 'projectile') this.spawnProjectile(e.from, e.to, e.skill);
+    if (e.kind === 'projectile') {
+      this.spawnProjectile(e.from, e.to, e.skill);
+      ['quickshot', 'piercing', 'poison'].includes(e.skill) ? sfx.arrow() : sfx.magic();
+    }
     else if (e.kind === 'slash') {
       const ent = [...this.entities.values()].find(en => Math.hypot(en.root.position.x - e.to.x, en.root.position.z - e.to.z) < 1.5);
       if (ent) this.flashEntity(ent);
@@ -488,12 +503,13 @@ export class GameClient {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const t = this.clock.elapsedTime;
 
-    // ── input intent (camera-relative)
+    // ── input intent (camera-relative; keyboard or virtual joystick)
     let ix = 0, iz = 0;
     if (this.keys['KeyW'] || this.keys['ArrowUp']) iz -= 1;
     if (this.keys['KeyS'] || this.keys['ArrowDown']) iz += 1;
     if (this.keys['KeyA'] || this.keys['ArrowLeft']) ix -= 1;
     if (this.keys['KeyD'] || this.keys['ArrowRight']) ix += 1;
+    if (this.touchMove) { ix = this.touchMove.x; iz = this.touchMove.z; }
     const len = Math.hypot(ix, iz) || 1;
     ix /= len; iz /= len;
     const sin = Math.sin(this.camAngle), cos = Math.cos(this.camAngle);
@@ -553,6 +569,8 @@ export class GameClient {
       const moving = id === this.selfId ? !!(wx || wz) : (ent.data.moving || (!ent.isPlayer && ent.data.state === 'chase'));
       animateRig(ent.root, t + id.length, moving, 0);
       if (ent.mountObj) ent.mountObj.userData.animate?.(t, moving);
+      // certified clowns honk as they walk 🤡🔊
+      if (ent.isPlayer && ent.data.name?.startsWith('🤡') && moving && Math.random() < 0.003) sfx.honk();
     }
 
     // ── camera (smoothed follow)
@@ -573,6 +591,8 @@ export class GameClient {
       this.world.update(this.scene, px, pz, dt, t);
       this.ui.updateZone(this.map, px, pz);
       this.ui.updateInteractPrompt(this, px, pz);
+      this.minimap.updateSmall(px, pz, this.entities, this.selfId, this.map);
+      this.minimap.updateBig(px, pz, this.ui.partyPositions?.() || []);
     }
 
     // fx lifecycle

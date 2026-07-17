@@ -331,5 +331,56 @@ h2 { font-family: 'Press Start 2P', monospace; font-size: 20px; color: var(--gol
 
 #online-count { color: var(--accent2); font-size: 13px; font-weight: 700; }
 
+/* minimap + world map */
+#minimap {
+  position: absolute; top: 64px; right: 64px; z-index: 5;
+  border-radius: 50%; border: 2px solid var(--panel-border);
+  background: var(--panel);
+}
+.map-overlay {
+  position: absolute; inset: 0; z-index: 30; background: rgba(5, 7, 14, .8);
+  display: flex; align-items: center; justify-content: center;
+}
+.map-inner { text-align: center; }
+#worldmap {
+  max-width: min(84vw, 84vh); max-height: min(84vw, 84vh);
+  border: 2px solid var(--panel-border); border-radius: 12px;
+  image-rendering: pixelated;
+}
+.map-hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+
+/* settings */
+.setting-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  font-size: 14px; font-weight: 600;
+}
+.setting-row input[type=range] { flex: 1; accent-color: var(--accent); }
+
+/* item upgrade glow */
+.islot.better { box-shadow: 0 0 10px rgba(72, 213, 151, .8); border-color: var(--accent2) !important; }
+.tt-diff-up { color: var(--accent2); }
+.tt-diff-down { color: #ff7675; }
+
+/* mobile */
+#joystick {
+  position: fixed; width: 140px; height: 140px; border-radius: 50%; z-index: 20;
+  background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.2);
+  left: 40px; bottom: 120px; touch-action: none;
+}
+#joystick-knob {
+  position: absolute; left: 45px; top: 45px; width: 50px; height: 50px; border-radius: 50%;
+  background: rgba(255,255,255,.35);
+}
+#btn-interact {
+  position: fixed; right: 30px; bottom: 190px; width: 64px; height: 64px; z-index: 20;
+  border-radius: 50%; font-size: 26px; background: var(--panel);
+  border: 2px solid var(--gold);
+}
+body.mobile #chat-log { height: 90px; }
+body.mobile #chat { width: 250px; }
+body.mobile .hotbar { left: auto; right: 14px; transform: none; bottom: 110px; }
+body.mobile .potionbar { left: auto; right: 14px; bottom: 40px; }
+body.mobile #minimap { width: 120px; height: 120px; }
+
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-thumb { background: #2b3350; border-radius: 4px; }

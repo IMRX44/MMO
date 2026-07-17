@@ -73,7 +73,8 @@ export function newCharacterState(name, className) {
     inventory: [],            // item[]
     potions: { hpPotion: 3, mpPotion: 3 },
     quests: { active: null, progress: 0, completed: [] },
-    pos: { x: SPAWN.x, z: SPAWN.z },
+    pos: { x: SPAWN.x + 10, z: SPAWN.z + 10 }, // beside the plaza, not inside the fountain
+
     map: 'world',
     bossKills: {},
     createdAt: Date.now(),

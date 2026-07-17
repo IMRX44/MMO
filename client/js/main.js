@@ -4,6 +4,7 @@ import { Net, api } from './net.js';
 import { UI } from './ui.js';
 import { GameClient } from './game.js';
 import { CLASS_ICONS } from './models.js';
+import { initMobile } from './mobile.js';
 
 const $ = id => document.getElementById(id);
 const screens = ['screen-auth', 'screen-charselect', 'screen-charcreate', 'screen-game'];
@@ -120,6 +121,7 @@ async function enterGame(charInfo) {
   show('screen-game');
   if (!game) {
     game = new GameClient($('game-canvas'), net, ui);
+    initMobile(game);
   }
   game.selfId = r.selfId;
   game.map = r.map;

@@ -124,7 +124,23 @@
     <button data-panel="panel-craft" title="Crafting [V]">🔨</button>
     <button data-panel="panel-skills" title="Skills [K]">📖</button>
     <button data-panel="panel-quests" title="Quests [J]">❗</button>
+    <button data-panel="panel-settings" title="Settings [O]">⚙️</button>
   </div>
+
+  <!-- minimap -->
+  <canvas id="minimap" width="180" height="180"></canvas>
+
+  <!-- full world map -->
+  <div id="map-overlay" class="map-overlay hidden">
+    <div class="map-inner">
+      <canvas id="worldmap" width="640" height="640"></canvas>
+      <div class="map-hint">Press [M] to close</div>
+    </div>
+  </div>
+
+  <!-- mobile controls -->
+  <div id="joystick" class="hidden"><div id="joystick-knob"></div></div>
+  <button id="btn-interact" class="hidden">✋</button>
 
   <!-- dungeon prompt -->
   <div id="dungeon-prompt" class="dungeon-prompt hidden"></div>
@@ -167,6 +183,17 @@
   <div id="panel-quests" class="panel hidden">
     <div class="panel-head">Quests <button class="panel-close">✕</button></div>
     <div id="quest-list"></div>
+  </div>
+  <div id="panel-settings" class="panel hidden">
+    <div class="panel-head">Settings <button class="panel-close">✕</button></div>
+    <div id="settings-body">
+      <label class="setting-row">🎵 Music <input id="vol-music" type="range" min="0" max="1" step="0.05"></label>
+      <label class="setting-row">🔊 Effects <input id="vol-sfx" type="range" min="0" max="1" step="0.05"></label>
+      <div class="tt-muted" style="padding:8px 14px 14px;font-size:12px">
+        WASD move · 1-6 skills · Tab target · F interact · Z mount · M map<br>
+        C/B/V/K/J panels · Q/E potions · Enter chat
+      </div>
+    </div>
   </div>
 
   <!-- party invite toast -->

@@ -973,7 +973,7 @@ export class GameServer {
         p.dead = false;
         p.hp = Math.round(p.derived.maxHp * 0.6);
         p.mp = Math.round(p.derived.maxMp * 0.6);
-        if (p.map === 'world') { p.x = SPAWN.x; p.z = SPAWN.z; }
+        if (p.map === 'world') { p.x = SPAWN.x + 10; p.z = SPAWN.z + 10; }
         else { p.x = DUNGEON_LAYOUT.entranceAt.x; p.z = DUNGEON_LAYOUT.entranceAt.z; }
         p.socket.emit('map', { map: p.map, x: p.x, z: p.z });
         this.emitSelf(p);
