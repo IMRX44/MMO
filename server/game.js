@@ -8,7 +8,7 @@ import {
   PVP_BIOME, INVENTORY_SIZE, RESPEC_COST,
   GATHER, RECIPES, MOUNTS, CHESTS,
   STAMINA, ENCHANT, PITY_SHARDS, itemTier, profLevel, PROF_GATES,
-  WORLD_BOSSES, DAILY_REWARDS,
+  WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE,
 } from '../shared/constants.js';
 import {
   biomeAt, groundHeight, clampToWorld, HALF_WORLD, TILE, WATER_LEVEL, BIOMES,
@@ -222,6 +222,7 @@ export class GameServer {
   removePlayer(socketId) {
     const p = this.players.get(socketId);
     if (!p) return;
+    if (p.trade) this.cancelTrade(p.trade, `${p.char.name} disconnected.`);
     this.persist(p);
     this.leaveParty(p, true);
     this.players.delete(socketId);
@@ -576,6 +577,7 @@ export class GameServer {
       this.grantXp(m, xpEach);
       m.char.gold += goldEach;
       this.progressQuest(m, mob);
+      this.bumpDaily(m, 'kills');
       this.emitSelf(m);
     }
 
@@ -648,6 +650,7 @@ export class GameServer {
   grantXp(p, xp) {
     const c = p.char;
     if (c.level >= MAX_LEVEL) return;
+    if (p.xpBuffUntil && p.xpBuffUntil > now()) xp = Math.round(xp * (1 + SHRINE.buffPct / 100));
     c.xp += xp;
     p.socket.emit('event', { type: 'xp', amount: xp });
     while (c.level < MAX_LEVEL && c.xp >= xpForLevel(c.level)) {
@@ -669,16 +672,87 @@ export class GameServer {
     if (!q) return;
     const match = (q.mob && mob.key === q.mob) || (q.boss && mob.tpl.id === q.boss);
     if (!match) return;
-    c.quests.progress++;
-    if (c.quests.progress >= q.count) {
-      c.quests.completed.push(q.id);
-      c.quests.active = null;
-      c.quests.progress = 0;
-      c.gold += q.reward.gold;
-      this.grantXp(p, q.reward.xp);
-      p.socket.emit('event', { type: 'questComplete', name: q.name, reward: q.reward });
-    }
+    this.bumpQuest(p, q);
+  }
+
+  bumpQuest(p, q, amount = 1) {
+    const c = p.char;
+    c.quests.progress += amount;
+    if (c.quests.progress >= q.count) this.completeQuest(p, q);
     this.emitInv(p);
+  }
+
+  completeQuest(p, q) {
+    const c = p.char;
+    c.quests.completed.push(q.id);
+    c.quests.active = null;
+    c.quests.progress = 0;
+    c.gold += q.reward.gold;
+    this.grantXp(p, q.reward.xp);
+    p.socket.emit('event', { type: 'questComplete', name: q.name, reward: q.reward });
+  }
+
+  // gather quests are turned in explicitly: consumes the materials
+  onTurnInQuest(p) {
+    const c = p.char;
+    const q = c.quests.active && QUESTS.find(x => x.id === c.quests.active);
+    if (!q || !q.mat) return;
+    if ((c.materials[q.mat] || 0) < q.count) return;
+    c.materials[q.mat] -= q.count;
+    this.completeQuest(p, q);
+    this.emitInv(p);
+    markDirty();
+  }
+
+  // --- daily quests -------------------------------------------------------------
+  ensureDaily(c) {
+    const day = Math.floor(Date.now() / 86400000);
+    if (!c.daily || c.daily.day !== day) {
+      c.daily = { day, kills: 0, gathers: 0, chests: 0, claimed: [] };
+    }
+    return c.daily;
+  }
+
+  bumpDaily(p, kind, amount = 1) {
+    const d = this.ensureDaily(p.char);
+    const before = d[kind];
+    d[kind] = (d[kind] || 0) + amount;
+    const dq = DAILY_QUESTS.find(q => q.kind === kind);
+    if (dq && before < dq.count && d[kind] >= dq.count) {
+      p.socket.emit('event', { type: 'system', text: `${dq.icon} Daily "${dq.name}" complete — claim it in the quest panel [J]!` });
+    }
+  }
+
+  onClaimDaily(p, id) {
+    const dq = DAILY_QUESTS.find(q => q.id === id);
+    if (!dq) return;
+    const d = this.ensureDaily(p.char);
+    if (d.claimed.includes(id) || (d[dq.kind] || 0) < dq.count) return;
+    d.claimed.push(id);
+    p.char.gold += dq.reward.gold;
+    p.char.tokens = (p.char.tokens || 0) + dq.reward.tokens;
+    p.socket.emit('event', { type: 'questComplete', name: dq.name, reward: dq.reward });
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  // --- shrine POI -----------------------------------------------------------------
+  onShrine(p) {
+    if (p.dead || p.map !== 'world') return;
+    const t = now();
+    const s = structuresNear(p.x, p.z, SHRINE.range + 4)
+      .find(s => s.kind === 'shrine' && Math.hypot(s.x - p.x, s.z - p.z) <= SHRINE.range);
+    if (!s) return;
+    if (t - (p.char.lastShrineAt || 0) < SHRINE.cdSec) {
+      const mins = Math.ceil((SHRINE.cdSec - (t - p.char.lastShrineAt)) / 60);
+      p.socket.emit('event', { type: 'system', text: `The shrine is dormant for you (${mins}m).` });
+      return;
+    }
+    p.char.lastShrineAt = t;
+    p.xpBuffUntil = t + SHRINE.buffSec;
+    p.socket.emit('event', { type: 'system', text: `🗿 Ancient blessing: +${SHRINE.buffPct}% XP for ${SHRINE.buffSec / 60} minutes!` });
+    this.effect('world', { kind: 'heal', at: { x: s.x, z: s.z } });
+    markDirty();
   }
 
   // --- character management intents ------------------------------------------
@@ -818,6 +892,7 @@ export class GameServer {
     if (Math.random() < 0.02 * Math.floor(pLvl / 10)) qty *= 2; // profession double-proc
     p.char.materials[matKey] = (p.char.materials[matKey] || 0) + qty;
     p.char.professions[res.kind] = profXp + 8 * res.tier;
+    this.bumpDaily(p, 'gathers');
     this.grantXp(p, GATHER.xpPerTier * res.tier);
     p.socket.emit('event', { type: 'gathered', mat: matKey, qty });
     if (node.uses >= GATHER.usesPerNode) {
@@ -861,6 +936,9 @@ export class GameServer {
       p.socket.emit('loot', { item });
     }
     p.socket.emit('event', { type: 'crafted', name: recipe.name });
+    // craft-type quests
+    const q = p.char.quests.active && QUESTS.find(x => x.id === p.char.quests.active);
+    if (q?.craft && (q.craft === 'any' || q.craft === recipe.group)) this.bumpQuest(p, q);
     this.emitSelf(p); this.emitInv(p);
     markDirty();
   }
@@ -981,11 +1059,12 @@ export class GameServer {
     if (p.dead || p.map !== 'world') return;
     const t = now();
     const structs = structuresNear(p.x, p.z, CHESTS.range + 4);
-    const s = structs.find(s => Math.hypot(s.x - p.x, s.z - p.z) <= CHESTS.range);
+    let s = structs.find(s => s.kind !== 'shrine' && Math.hypot(s.x - p.x, s.z - p.z) <= CHESTS.range);
     if (!s) return;
     const openedAt = this.chests.get(s.key) || 0;
     if (t - openedAt < CHESTS.respawnSec) return; // still on cooldown
     this.chests.set(s.key, t);
+    if (s.kind === 'tower') s = { ...s, tier: Math.min(5, s.tier + 1) }; // watchtowers hold better loot
     const [g0, g1] = CHESTS.gold(s.tier);
     const gold = ri(g0, g1);
     p.char.gold += gold;
@@ -1001,6 +1080,7 @@ export class GameServer {
     }
     p.socket.emit('event', { type: 'chest', gold });
     this.effect('world', { kind: 'chestOpened', key: s.key, x: s.x, z: s.z, respawnSec: CHESTS.respawnSec });
+    this.bumpDaily(p, 'chests');
     this.grantXp(p, 20 * s.tier);
     this.emitSelf(p); this.emitInv(p);
     markDirty();
@@ -1112,6 +1192,125 @@ export class GameServer {
     if (!party) return;
     for (const sid of party.members) {
       this.players.get(sid)?.socket.emit('chat', { from: 'Party', text, channel: 'party' });
+    }
+  }
+
+  // --- direct trade (secure, double-confirm, server-validated) --------------------
+  onTradeAction(p, data) {
+    const action = data?.action;
+    if (action === 'invite') {
+      const target = [...this.players.values()].find(o =>
+        o.char.name.toLowerCase() === String(data.name || '').toLowerCase().replace(/^🤡\s*/, ''));
+      if (!target || target === p || target.map !== p.map) return;
+      if (dist(p, target) > 15) {
+        p.socket.emit('event', { type: 'system', text: 'Too far away to trade.' });
+        return;
+      }
+      if (p.trade || target.trade) return;
+      target.pendingTradeFrom = p.socketId;
+      target.socket.emit('tradeInvite', { from: p.char.name });
+      p.socket.emit('event', { type: 'system', text: `Trade offer sent to ${target.char.name}.` });
+      return;
+    }
+    if (action === 'accept') {
+      const from = this.players.get(p.pendingTradeFrom);
+      p.pendingTradeFrom = null;
+      if (!from || from.trade || p.trade || dist(p, from) > 15) return;
+      const session = {
+        ids: [from.socketId, p.socketId],
+        offers: { [from.socketId]: { gold: 0, items: [] }, [p.socketId]: { gold: 0, items: [] } },
+        confirmed: { [from.socketId]: false, [p.socketId]: false },
+      };
+      from.trade = session;
+      p.trade = session;
+      this.emitTrade(session);
+      return;
+    }
+    const session = p.trade;
+    if (!session) return;
+    const offer = session.offers[p.socketId];
+    const resetConfirms = () => { for (const id of session.ids) session.confirmed[id] = false; };
+
+    if (action === 'add') {
+      const item = p.char.inventory.find(i => i.id === String(data.itemId));
+      if (!item || offer.items.includes(item.id) || offer.items.length >= 8) return;
+      offer.items.push(item.id);
+      resetConfirms();
+    } else if (action === 'remove') {
+      offer.items = offer.items.filter(id => id !== String(data.itemId));
+      resetConfirms();
+    } else if (action === 'gold') {
+      const amount = Math.max(0, Math.min(p.char.gold, Math.floor(Number(data.amount) || 0)));
+      offer.gold = amount;
+      resetConfirms();
+    } else if (action === 'confirm') {
+      session.confirmed[p.socketId] = true;
+      if (session.ids.every(id => session.confirmed[id])) {
+        this.executeTrade(session);
+        return;
+      }
+    } else if (action === 'cancel') {
+      this.cancelTrade(session, `${p.char.name} cancelled the trade.`);
+      return;
+    }
+    this.emitTrade(session);
+  }
+
+  emitTrade(session) {
+    for (const id of session.ids) {
+      const me = this.players.get(id);
+      const otherId = session.ids.find(x => x !== id);
+      const other = this.players.get(otherId);
+      if (!me || !other) return;
+      const expand = (pl, o) => ({
+        gold: o.gold,
+        items: o.items.map(iid => pl.char.inventory.find(i => i.id === iid)).filter(Boolean),
+      });
+      me.socket.emit('tradeState', {
+        partner: other.char.name,
+        mine: expand(me, session.offers[id]),
+        theirs: expand(other, session.offers[otherId]),
+        confirmed: { mine: session.confirmed[id], theirs: session.confirmed[otherId] },
+      });
+    }
+  }
+
+  executeTrade(session) {
+    const [aId, bId] = session.ids;
+    const a = this.players.get(aId), b = this.players.get(bId);
+    if (!a || !b) return this.cancelTrade(session, 'Trade failed.');
+    const oa = session.offers[aId], ob = session.offers[bId];
+    const itemsA = oa.items.map(id => a.char.inventory.find(i => i.id === id));
+    const itemsB = ob.items.map(id => b.char.inventory.find(i => i.id === id));
+    // full validation at execute time — nothing is trusted from earlier
+    if (itemsA.includes(undefined) || itemsB.includes(undefined) ||
+        a.char.gold < oa.gold || b.char.gold < ob.gold ||
+        a.char.inventory.length - itemsA.length + itemsB.length > INVENTORY_SIZE ||
+        b.char.inventory.length - itemsB.length + itemsA.length > INVENTORY_SIZE) {
+      return this.cancelTrade(session, 'Trade failed validation.');
+    }
+    a.char.inventory = a.char.inventory.filter(i => !oa.items.includes(i.id));
+    b.char.inventory = b.char.inventory.filter(i => !ob.items.includes(i.id));
+    a.char.inventory.push(...itemsB);
+    b.char.inventory.push(...itemsA);
+    a.char.gold += ob.gold - oa.gold;
+    b.char.gold += oa.gold - ob.gold;
+    for (const pl of [a, b]) {
+      pl.trade = null;
+      pl.socket.emit('tradeDone', { ok: true });
+      pl.socket.emit('event', { type: 'system', text: '🤝 Trade complete!' });
+      this.emitSelf(pl); this.emitInv(pl);
+    }
+    markDirty();
+  }
+
+  cancelTrade(session, reason) {
+    for (const id of session.ids) {
+      const pl = this.players.get(id);
+      if (pl) {
+        pl.trade = null;
+        pl.socket.emit('tradeDone', { ok: false, reason });
+      }
     }
   }
 
@@ -1474,6 +1673,7 @@ export class GameServer {
       professions: p.char.professions,
       shards: p.char.shards || 0,
       tokens: p.char.tokens || 0,
+      daily: this.ensureDaily(p.char),
     });
   }
 

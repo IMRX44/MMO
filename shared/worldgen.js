@@ -159,15 +159,16 @@ export function decorationAt(tx, tz) {
 export const STRUCT_GRID = 24;
 export function structureAt(gx, gz) {
   const r = hash2(gx, gz, WORLD_SEED + 999);
-  if (r > 0.955) {
+  if (r > 0.94) {
     const tx = gx * STRUCT_GRID + Math.floor((hash2(gx, gz, 5) - 0.5) * 10);
     const tz = gz * STRUCT_GRID + Math.floor((hash2(gz, gx, 6) - 0.5) * 10);
     if (townBlend(tx, tz) > 0) return null;
     const h = heightAt(tx, tz);
     if (h <= WATER_LEVEL + 0.5) return null;
     const b = biomeAt(tx, tz);
+    const kind = r > 0.978 ? 'camp' : r > 0.955 ? 'ruin' : r > 0.947 ? 'tower' : 'shrine';
     return {
-      kind: r > 0.978 ? 'camp' : 'ruin',
+      kind,
       tx, tz, x: tx * TILE, z: tz * TILE,
       tier: b.tier, biome: b,
       key: `s${gx},${gz}`,

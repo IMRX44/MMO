@@ -205,7 +205,9 @@ export const DUNGEONS = {
 export const QUESTS = [
   { id: 'q1', name: 'Slime Trouble',      mob: 'slime',      count: 8,  reward: { xp: 120,  gold: 30 },  minLevel: 1 },
   { id: 'q2', name: 'Boar Hunt',          mob: 'boar',       count: 10, reward: { xp: 260,  gold: 60 },  minLevel: 2,  requires: 'q1' },
-  { id: 'q3', name: 'Cull the Pack',      mob: 'wolf',       count: 10, reward: { xp: 500,  gold: 110 }, minLevel: 5,  requires: 'q2' },
+  { id: 'g1', name: 'Timber for the Carpenter', mat: 'wood1', count: 15, reward: { xp: 300, gold: 80 },  minLevel: 2,  requires: 'q2' },
+  { id: 'c1', name: 'Forge Your First Blade',   craft: 'gear', count: 1, reward: { xp: 400, gold: 100 }, minLevel: 3,  requires: 'g1' },
+  { id: 'q3', name: 'Cull the Pack',      mob: 'wolf',       count: 10, reward: { xp: 500,  gold: 110 }, minLevel: 5,  requires: 'c1' },
   { id: 'q4', name: 'Rotten Roots',       mob: 'treant',     count: 6,  reward: { xp: 800,  gold: 170 }, minLevel: 8,  requires: 'q3' },
   { id: 'q5', name: 'The Bone King',      boss: 'boneKing',  count: 1,  reward: { xp: 1800, gold: 400 }, minLevel: 8,  requires: 'q4' },
   { id: 'q6', name: 'Sting Operation',    mob: 'scorpion',   count: 10, reward: { xp: 1300, gold: 260 }, minLevel: 12, requires: 'q5' },
@@ -345,6 +347,16 @@ export const WORLD_BOSSES = {
     shareThreshold: 0.02, // ≥2% damage = personal loot roll
   },
 };
+
+// Daily quests: 3 fixed objectives, reset per UTC day, claimable when done.
+export const DAILY_QUESTS = [
+  { id: 'd_kill',   name: 'Cull the Wilds',   kind: 'kills',   count: 15, reward: { gold: 120, tokens: 2 }, icon: '⚔️' },
+  { id: 'd_gather', name: 'Harvest Day',      kind: 'gathers', count: 20, reward: { gold: 100, tokens: 2 }, icon: '⛏️' },
+  { id: 'd_chest',  name: 'Treasure Hunter',  kind: 'chests',  count: 2,  reward: { gold: 150, tokens: 3 }, icon: '💰' },
+];
+
+// Shrine POI: free XP buff on touch, per-character hourly.
+export const SHRINE = { buffPct: 15, buffSec: 900, cdSec: 3600, range: 6 };
 
 // 7-day rotating login rewards (index = streak % 7)
 export const DAILY_REWARDS = [

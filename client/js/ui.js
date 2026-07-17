@@ -1,7 +1,7 @@
 // HUD + panels. Renders server-sent self/inventory state; sends intents back.
 import {
   CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS,
-  RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS, profLevel,
+  RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS, profLevel, DAILY_QUESTS,
 } from '/shared/constants.js';
 import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
@@ -24,6 +24,9 @@ export class UI {
     net.on('loot', l => this.onLoot(l));
     net.on('partyInvite', p => this.onPartyInvite(p));
     net.on('partyState', p => this.onPartyState(p));
+    net.on('tradeInvite', t => this.onTradeInvite(t));
+    net.on('tradeState', t => this.onTradeState(t));
+    net.on('tradeDone', t => this.onTradeDone(t));
 
     // panels
     document.querySelectorAll('#menu-buttons button').forEach(btn => {
@@ -72,6 +75,7 @@ export class UI {
         input.blur();
         if (!text) return;
         if (text.startsWith('/invite ')) this.net.emit('party', { action: 'invite', name: text.slice(8).trim() });
+        else if (text.startsWith('/trade ')) this.net.emit('trade', { action: 'invite', name: text.slice(7).trim() });
         else if (text === '/leave') this.net.emit('party', { action: 'leave' });
         else this.net.emit('chat', { text });
       }
@@ -344,7 +348,8 @@ export class UI {
       el.dataset.rarity = item.rarity;
       el.innerHTML = this.itemIcon(item);
       el.addEventListener('click', e => {
-        if (e.shiftKey) this.net.emit('sellItem', { itemId: item.id });
+        if (this.tradeActive) this.net.emit('trade', { action: 'add', itemId: item.id });
+        else if (e.shiftKey) this.net.emit('sellItem', { itemId: item.id });
         else if (e.ctrlKey || e.metaKey) this.net.emit('enchant', { itemId: item.id });
         else if (e.altKey) this.net.emit('salvage', { itemId: item.id });
         else this.net.emit('equip', { itemId: item.id });
@@ -416,11 +421,52 @@ export class UI {
       b.addEventListener('click', () => this.net.emit('upgradeSkill', { skillId: b.dataset.id })));
   }
 
+  questGoal(quest) {
+    if (quest.mob) return `Kill ${quest.count} × ${quest.mob}`;
+    if (quest.boss) return 'Slay the boss';
+    if (quest.mat) {
+      const kind = quest.mat.replace(/\d+$/, '');
+      return `Deliver ${quest.count} × ${MAT_ICONS[kind] || ''} ${MAT_NAMES[kind]}`;
+    }
+    if (quest.craft) return `Craft ${quest.count} × ${quest.craft === 'any' ? 'anything' : quest.craft}`;
+    return '';
+  }
+
   renderQuests() {
     const list = $('quest-list');
     const q = this.inv?.quests;
     if (!q) return;
     list.innerHTML = '';
+
+    // dailies
+    const daily = this.inv.daily;
+    if (daily) {
+      const head = document.createElement('div');
+      head.className = 'q-name';
+      head.style.color = 'var(--gold)';
+      head.textContent = '📅 Daily Quests';
+      list.appendChild(head);
+      for (const dq of DAILY_QUESTS) {
+        const have = daily[dq.kind] || 0;
+        const claimed = daily.claimed?.includes(dq.id);
+        const done = have >= dq.count;
+        const row = document.createElement('div');
+        row.className = 'quest-row';
+        row.innerHTML = `
+          <div class="q-name">${dq.icon} ${dq.name} ${claimed ? '✅' : ''}</div>
+          <div class="q-meta">${Math.min(have, dq.count)}/${dq.count} — ${dq.reward.gold}g + ${dq.reward.tokens} 🏅</div>
+          ${done && !claimed ? `<button class="btn-small dq-claim" data-id="${dq.id}">Claim!</button>` : ''}`;
+        list.appendChild(row);
+      }
+      list.querySelectorAll('.dq-claim').forEach(b =>
+        b.addEventListener('click', () => this.net.emit('claimDaily', { id: b.dataset.id })));
+    }
+
+    const head2 = document.createElement('div');
+    head2.className = 'q-name';
+    head2.style.cssText = 'color:var(--gold);margin-top:10px';
+    head2.textContent = '📜 Story Quests';
+    list.appendChild(head2);
     for (const quest of QUESTS) {
       const done = q.completed.includes(quest.id);
       const active = q.active === quest.id;
@@ -428,15 +474,24 @@ export class UI {
       if (!done && !active && !available) continue;
       const row = document.createElement('div');
       row.className = 'quest-row';
+      let turnIn = '';
+      if (active && quest.mat) {
+        const have = this.inv.materials?.[quest.mat] || 0;
+        turnIn = have >= quest.count
+          ? `<button class="btn-small q-turnin">Turn in!</button>`
+          : `<div class="q-done">${have}/${quest.count} gathered</div>`;
+      }
       row.innerHTML = `
         <div class="q-name">${done ? '✅' : active ? '⏳' : '❗'} ${quest.name}</div>
-        <div class="q-meta">${quest.mob ? `Kill ${quest.count} × ${quest.mob}` : `Slay the boss`} — ${quest.reward.xp} XP, ${quest.reward.gold}g</div>
-        ${active ? `<div class="q-done">${q.progress}/${quest.count}</div>` : ''}
+        <div class="q-meta">${this.questGoal(quest)} — ${quest.reward.xp} XP, ${quest.reward.gold}g</div>
+        ${active && !quest.mat ? `<div class="q-done">${q.progress}/${quest.count}</div>` : ''}
+        ${turnIn}
         ${available ? `<button class="btn-small q-accept" data-id="${quest.id}">Accept</button>` : ''}`;
       list.appendChild(row);
     }
     list.querySelectorAll('.q-accept').forEach(b =>
       b.addEventListener('click', () => this.net.emit('acceptQuest', { questId: b.dataset.id })));
+    list.querySelector('.q-turnin')?.addEventListener('click', () => this.net.emit('turnInQuest'));
   }
 
   // --- target / party -----------------------------------------------------------------
@@ -481,6 +536,58 @@ export class UI {
       const el = document.querySelector(`.pm[data-id="${m.id}"] .fill`);
       if (el) el.style.width = Math.max(0, (snap.hp / snap.maxHp) * 100) + '%';
     }
+  }
+
+  // --- trade -------------------------------------------------------------------
+  onTradeInvite(t) {
+    const toast = $('trade-toast');
+    toast.classList.remove('hidden');
+    toast.innerHTML = `<b>${t.from}</b> wants to trade.<br>
+      <button class="btn-primary" id="tr-accept">Trade</button>
+      <button class="btn-small" id="tr-decline">Decline</button>`;
+    $('tr-accept').addEventListener('click', () => { this.net.emit('trade', { action: 'accept' }); toast.classList.add('hidden'); });
+    $('tr-decline').addEventListener('click', () => toast.classList.add('hidden'));
+    setTimeout(() => toast.classList.add('hidden'), 25000);
+  }
+
+  onTradeState(t) {
+    this.tradeActive = true;
+    const panel = $('panel-trade');
+    if (panel.classList.contains('hidden')) {
+      panel.classList.remove('hidden');
+      $('panel-inv').classList.remove('hidden');
+      this.renderInventory();
+      $('trade-cancel').onclick = () => this.net.emit('trade', { action: 'cancel' });
+      $('trade-confirm').onclick = () => this.net.emit('trade', { action: 'confirm' });
+      $('trade-gold-input').onchange = e => this.net.emit('trade', { action: 'gold', amount: +e.target.value });
+    }
+    $('trade-partner').textContent = t.partner;
+    $('trade-my-confirm').innerHTML = t.confirmed.mine ? '<span class="confirm-yes">✔ ready</span>' : '';
+    $('trade-their-confirm').innerHTML = t.confirmed.theirs ? '<span class="confirm-yes">✔ ready</span>' : '';
+    $('trade-their-gold').textContent = t.theirs.gold;
+    const render = (elId, items, mine) => {
+      const el = $(elId);
+      el.innerHTML = '';
+      for (const item of items) {
+        const d = document.createElement('div');
+        d.className = 'islot';
+        d.dataset.rarity = item.rarity;
+        d.textContent = this.itemIcon(item);
+        d.addEventListener('mouseenter', () => this.showItemTooltip(item, mine ? 'Click to remove' : ''));
+        d.addEventListener('mouseleave', () => this.hideTooltip());
+        if (mine) d.addEventListener('click', () => this.net.emit('trade', { action: 'remove', itemId: item.id }));
+        el.appendChild(d);
+      }
+    };
+    render('trade-mine', t.mine.items, true);
+    render('trade-theirs', t.theirs.items, false);
+  }
+
+  onTradeDone(t) {
+    this.tradeActive = false;
+    $('panel-trade').classList.add('hidden');
+    if (!t.ok && t.reason) this.chatLine({ from: 'System', text: t.reason, channel: 'system' });
+    if (t.ok) sfx.coin();
   }
 
   // --- world boss timer -------------------------------------------------------
@@ -543,6 +650,8 @@ export class UI {
         return;
       }
     }
+    const shrine = game.world.nearestShrine(x, z, 6);
+    if (shrine) { show(`🗿 Ancient Shrine — press <b>[F]</b> for a +15% XP blessing`); return; }
     const chest = game.world.nearestChest(x, z, CHESTS.range);
     if (chest) { show(`💰 Loot chest — press <b>[F]</b> to open`); return; }
     const node = game.world.nearestNode(x, z, GATHER.range);

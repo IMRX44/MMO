@@ -184,6 +184,8 @@ export class GameClient {
         return;
       }
     }
+    const shrine = this.world.nearestShrine(x, z, 6);
+    if (shrine) { this.net.emit('shrine'); sfx.heal(); return; }
     const chest = this.world.nearestChest(x, z, CHESTS.range);
     if (chest) { this.net.emit('openChest'); return; }
     const node = this.world.nearestNode(x, z, GATHER.range);

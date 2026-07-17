@@ -243,7 +243,43 @@ function buildDecorationInner(kind, tx, tz, h) {
 function buildStructure(s) {
   const g = new THREE.Group();
   const h = groundHeight(s.x, s.z);
-  if (s.kind === 'ruin') {
+  if (s.kind === 'shrine') {
+    // ancient shrine: altar + floating glowing crystal (no chest)
+    g.add(box(2.6, 0.5, 2.6, MAT.stoneWall, 0, 0.25, 0));
+    g.add(box(1.8, 0.4, 1.8, MAT.rockDark, 0, 0.7, 0));
+    g.add(box(0.7, 1.4, 0.7, MAT.stoneWall, 0, 1.6, 0));
+    const crystal = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.7),
+      new THREE.MeshLambertMaterial({ color: 0x8be9fd, emissive: 0x3b6fd9, emissiveIntensity: 0.9, transparent: true, opacity: 0.9 }));
+    crystal.position.y = 3.1;
+    crystal.rotation.y = 0.6;
+    g.add(crystal);
+    const light = new THREE.PointLight(0x74d0f1, 22, 16);
+    light.position.y = 3.2;
+    g.add(light);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
+      g.add(box(0.5, 1.1 + (i % 2) * 0.5, 0.5, MAT.rockDark, Math.cos(a) * 2.6, 0.55, Math.sin(a) * 2.6));
+    }
+    g.position.set(s.x, h, s.z);
+    g.userData.shrine = { key: s.key };
+    g.userData.structKey = s.key;
+    return withEnvOverride('env_shrine', g);
+  }
+  if (s.kind === 'tower') {
+    // watchtower: tall stone column with wooden platform, chest on top area
+    g.add(box(3, 6.5, 3, MAT.stoneWall, 0, 3.25, 0));
+    g.add(box(4.2, 0.4, 4.2, MAT.plankDark, 0, 6.7, 0));
+    for (const [dx, dz] of [[-1.9, -1.9], [1.9, -1.9], [-1.9, 1.9], [1.9, 1.9]]) {
+      g.add(box(0.3, 1.1, 0.3, MAT.plank, dx, 7.4, dz));
+    }
+    g.add(box(4.6, 0.3, 4.6, MAT.roofDark, 0, 8.1, 0));
+    g.add(box(0.8, 1.6, 0.15, MAT.plankDark, 0, 0.8, 1.55)); // door
+    const flame = box(0.4, 0.5, 0.4, MAT.lava, 0, 8.6, 0);
+    g.add(flame);
+    const light = new THREE.PointLight(0xff8844, 26, 24);
+    light.position.y = 8.6;
+    g.add(light);
+  } else if (s.kind === 'ruin') {
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2;
       const ph = 1.2 + ((s.tx + i) % 3) * 0.9;
@@ -426,7 +462,8 @@ function buildChunk(cx, cz, interactables) {
     if (s.tx >= baseTx && s.tx < baseTx + CHUNK && s.tz >= baseTz && s.tz < baseTz + CHUNK) {
       const sg = buildStructure(s);
       group.add(sg);
-      interactables.chests.set(s.key, sg);
+      if (s.kind === 'shrine') interactables.shrines.set(s.key, sg);
+      else interactables.chests.set(s.key, sg);
     }
   }
   return group;
@@ -436,7 +473,7 @@ export class WorldRenderer {
   constructor(scene) {
     this.scene = scene;
     this.chunks = new Map();
-    this.interactables = { nodes: new Map(), chests: new Map() };
+    this.interactables = { nodes: new Map(), chests: new Map(), shrines: new Map() };
     this.worldObjects = new THREE.Group();
     this.dungeonObjects = new THREE.Group();
     this.currentMap = null;
@@ -572,7 +609,10 @@ export class WorldRenderer {
         chunk.traverse(o => {
           o.geometry?.dispose();
           if (o.userData.node) this.interactables.nodes.delete(`${o.userData.node.tx},${o.userData.node.tz}`);
-          if (o.userData.structKey) this.interactables.chests.delete(o.userData.structKey);
+          if (o.userData.structKey) {
+            this.interactables.chests.delete(o.userData.structKey);
+            this.interactables.shrines.delete(o.userData.structKey);
+          }
         });
         this.chunks.delete(key);
       }
@@ -584,6 +624,15 @@ export class WorldRenderer {
     let best = null, bestD = range;
     for (const [key, g] of this.interactables.nodes) {
       if (g.userData.depleted) continue;
+      const d = Math.hypot(g.position.x - x, g.position.z - z);
+      if (d < bestD) { bestD = d; best = g; }
+    }
+    return best;
+  }
+
+  nearestShrine(x, z, range) {
+    let best = null, bestD = range;
+    for (const [, g] of this.interactables.shrines) {
       const d = Math.hypot(g.position.x - x, g.position.z - z);
       if (d < bestD) { bestD = d; best = g; }
     }

@@ -369,6 +369,15 @@ h2 { font-family: 'Press Start 2P', monospace; font-size: 20px; color: var(--gol
 .tt-diff-up { color: var(--accent2); }
 .tt-diff-down { color: #ff7675; }
 
+/* trade */
+.trade-cols { display: flex; gap: 10px; padding: 10px 14px 0; }
+.trade-col { flex: 1; background: #0d1120; border-radius: 8px; padding: 8px; }
+.trade-title { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.trade-items { min-height: 70px; display: flex; flex-wrap: wrap; gap: 4px; }
+.trade-items .islot { width: 34px; height: 34px; aspect-ratio: auto; font-size: 15px; }
+.trade-gold { margin-top: 6px; font-size: 13px; color: var(--gold); }
+.confirm-yes { color: var(--accent2); }
+
 /* mobile */
 #joystick {
   position: fixed; width: 140px; height: 140px; border-radius: 50%; z-index: 20;
