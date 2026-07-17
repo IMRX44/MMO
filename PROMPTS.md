@@ -89,6 +89,22 @@ plain light gray background, game asset concept art, no shadows on ground
 
 ---
 
+## 🐴 مرکب‌ها (۳ فایل)
+
+⚠️ برای مرکب‌ها به‌جای T-pose بنویس **standing side view** و حتماً چهارپا و دارای زین باشه.
+مدل رو طوری اکسپورت کن که پاها روی y=0 و **سر به سمت +Z** باشه، قد حدود 2.5 واحد.
+
+### `horse.glb` — Riding Horse (اسب سواری، T1)
+> chunky voxel 3D animal, pixel-art style, Minecraft-like blocky proportions, flat vibrant colors, full body, standing pose, side view, centered, plain light gray background, game asset — **a sturdy brown riding horse with dark brown mane and tail, leather saddle on back, friendly eyes, four strong legs, well-groomed**
+
+### `direwolf.glb` — Direwolf (گرگ وحشی، T3)
+> …same style prefix (standing side view)… — **a huge rideable direwolf mount, blue-gray thick fur, glowing amber eyes, bared fangs, leather saddle strapped on back, muscular build, battle-scarred, fierce but loyal**
+
+### `magmasteed.glb` — Magma Steed (اسب مذاب، T5)
+> …same style prefix (standing side view)… — **a demonic horse mount made of black volcanic rock, glowing orange lava cracks across body and legs, mane and tail made of living flame, burning hoofprints, obsidian saddle, smoldering ember eyes**
+
+---
+
 ## ✅ چک‌لیست اسم فایل‌ها
 
 | فایل | نقش |
@@ -101,5 +117,6 @@ plain light gray background, game asset concept art, no shadows on ground
 | `golem.glb` `demon.glb` | Ashen Wastes |
 | `skeleton.glb` `boneKing.glb` | Crypt of the Fallen King |
 | `infernal.glb` | Molten Forge Depths |
+| `horse.glb` `direwolf.glb` `magmasteed.glb` | مرکب‌ها |
 
 هر فایلی که آماده شد بده به من تا اگه scale/جهت‌گیریش نیاز به تنظیم داشت توی کد لودر درستش کنم.

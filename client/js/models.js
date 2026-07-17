@@ -378,6 +378,20 @@ export function createMount(name) {
   const wrapper = new THREE.Group();
   wrapper.add(m);
   wrapper.userData.animate = m.userData.animate;
+  // AI-generated GLB drop-in, same pipeline as characters (client/models/<name>.glb)
+  if (!glbCache.has(name)) {
+    glbCache.set(name, new Promise(resolve => {
+      loader.load(`/models/${name}.glb`, gltf => resolve(gltf.scene), undefined, () => resolve(null));
+    }));
+  }
+  glbCache.get(name).then(scene => {
+    if (!scene) return;
+    wrapper.remove(m);
+    const clone = scene.clone(true);
+    clone.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    wrapper.add(clone);
+    wrapper.userData.animate = null;
+  });
   return wrapper;
 }
 
