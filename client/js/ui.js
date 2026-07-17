@@ -1,7 +1,7 @@
 // HUD + panels. Renders server-sent self/inventory state; sends intents back.
 import {
   CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS,
-  RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS,
+  RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS, profLevel,
 } from '/shared/constants.js';
 import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
@@ -157,7 +157,10 @@ export class UI {
     this.setBar('bar-hp', 'txt-hp', s.hp, s.maxHp);
     this.setBar('bar-mp', 'txt-mp', s.mp, s.maxMp);
     this.setBar('bar-xp', 'txt-xp', s.xp, s.xpNext, true);
+    $('bar-stamina').style.width = Math.max(0, (s.stamina / s.maxStamina) * 100) + '%';
     $('txt-gold').textContent = s.gold.toLocaleString();
+    $('txt-tokens').textContent = s.tokens ?? 0;
+    $('txt-shards').textContent = s.shards ?? 0;
 
     // cooldown overlays
     if (this.slotEls) {
@@ -227,6 +230,16 @@ export class UI {
     const mats = this.inv.materials || {};
     const gold = this.inv.gold ?? 0;
     list.innerHTML = '';
+    // profession levels strip
+    const profs = this.inv.professions || {};
+    const profHtml = ['wood', 'stone', 'ore', 'fiber', 'hide'].map(k => {
+      const lvl = profLevel(profs[k] || 0);
+      return `<span class="mat-chip" title="${k} profession">${MAT_ICONS[k]} Lv ${lvl}</span>`;
+    }).join('');
+    const profDiv = document.createElement('div');
+    profDiv.style.marginBottom = '8px';
+    profDiv.innerHTML = profHtml + `<div class="tt-muted" style="font-size:11px;margin-top:4px">T3 needs Lv20 · T4 Lv40 · T5 Lv60 — gather to skill up</div>`;
+    list.appendChild(profDiv);
     for (const r of RECIPES.filter(r => r.group === this.craftGroup)) {
       if (r.group === 'mount' && this.inv.mounts?.includes(r.out.mount)) continue;
       let craftable = true;
@@ -312,8 +325,11 @@ export class UI {
       el.dataset.rarity = item?.rarity || '';
       el.innerHTML = (item ? this.itemIcon(item) : '') + `<span class="sl-label">${slot}</span>`;
       if (item) {
-        el.addEventListener('click', () => this.net.emit('unequip', { slot }));
-        el.addEventListener('mouseenter', () => this.showItemTooltip(item, 'Click to unequip'));
+        el.addEventListener('click', e => {
+          if (e.ctrlKey || e.metaKey) this.net.emit('enchant', { itemId: item.id });
+          else this.net.emit('unequip', { slot });
+        });
+        el.addEventListener('mouseenter', () => this.showItemTooltip(item, 'Click unequip · Ctrl enchant'));
         el.addEventListener('mouseleave', () => this.hideTooltip());
       }
       eq.appendChild(el);
@@ -329,9 +345,11 @@ export class UI {
       el.innerHTML = this.itemIcon(item);
       el.addEventListener('click', e => {
         if (e.shiftKey) this.net.emit('sellItem', { itemId: item.id });
+        else if (e.ctrlKey || e.metaKey) this.net.emit('enchant', { itemId: item.id });
+        else if (e.altKey) this.net.emit('salvage', { itemId: item.id });
         else this.net.emit('equip', { itemId: item.id });
       });
-      el.addEventListener('mouseenter', () => this.showItemTooltip(item, 'Click: equip · Shift+Click: sell'));
+      el.addEventListener('mouseenter', () => this.showItemTooltip(item, 'Click equip · Shift sell · Ctrl enchant · Alt salvage'));
       el.addEventListener('mouseleave', () => this.hideTooltip());
       grid.appendChild(el);
     }
@@ -362,9 +380,10 @@ export class UI {
       const diff = this.itemScore(item) - this.itemScore(eq);
       compare = `<div class="${diff >= 0 ? 'tt-diff-up' : 'tt-diff-down'}">${diff >= 0 ? '▲' : '▼'} ${diff >= 0 ? '+' : ''}${Math.round(diff)} vs equipped (${eq.name})</div>`;
     }
+    const ench = item.enchant ? ` +${item.enchant}` : '';
     this.tooltip.innerHTML = `
-      <div class="tt-name" style="color:${r.color}">${item.name}</div>
-      <div class="tt-muted">${r.name} ${item.slot} · item level ${item.level}${item.crafted ? ' · crafted' : ''}</div>
+      <div class="tt-name" style="color:${r.color}">${item.name}${ench ? `<span style="color:#c084fc">${ench}</span>` : ''}</div>
+      <div class="tt-muted">${r.name} ${item.slot} · item level ${item.level}${item.crafted ? ' · crafted' : ''}${item.enchant ? ` · enchant +${item.enchant}/10 (+${item.enchant * 4}%)` : ''}</div>
       ${item.attack ? `Attack +${item.attack}<br>` : ''}${item.spell ? `Spell +${item.spell}<br>` : ''}
       ${item.armor ? `Armor +${item.armor}<br>` : ''}${item.hp ? `HP +${item.hp}<br>` : ''}
       ${stats ? `<div>${stats}</div>` : ''}
@@ -462,6 +481,36 @@ export class UI {
       const el = document.querySelector(`.pm[data-id="${m.id}"] .fill`);
       if (el) el.style.width = Math.max(0, (snap.hp / snap.maxHp) * 100) + '%';
     }
+  }
+
+  // --- world boss timer -------------------------------------------------------
+  setWorldBoss(wb) {
+    const el = $('wb-timer');
+    el.classList.remove('hidden');
+    if (wb.state === 'alive') el.innerHTML = `🌋 <b>${wb.name}</b><br>ALIVE at (${Math.round(wb.x)}, ${Math.round(wb.z)})!`;
+    else el.classList.add('hidden');
+  }
+
+  setWorldBossList(list) {
+    const el = $('wb-timer');
+    if (!list?.length) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    this.wbList = list;
+    this.renderWbTimer();
+    clearInterval(this.wbInterval);
+    this.wbInterval = setInterval(() => {
+      for (const wb of this.wbList) if (wb.inSec > 0) wb.inSec--;
+      this.renderWbTimer();
+    }, 1000);
+  }
+
+  renderWbTimer() {
+    const el = $('wb-timer');
+    el.innerHTML = this.wbList.map(wb => {
+      if (wb.state === 'alive') return `🌋 <b>${wb.name}</b><br>ALIVE at (${Math.round(wb.x)}, ${Math.round(wb.z)})`;
+      const m = Math.floor(wb.inSec / 60), s = wb.inSec % 60;
+      return `🌋 <b>${wb.name.split(',')[0]}</b> in ${m}:${String(s).padStart(2, '0')}`;
+    }).join('<br>');
   }
 
   // --- zone / dungeon prompts ------------------------------------------------------------

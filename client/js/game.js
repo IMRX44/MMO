@@ -69,6 +69,12 @@ export class GameClient {
     net.on('event', e => this.onEvent(e));
     net.on('fx', e => this.onFx(e));
     net.on('self', s => { this.selfSpeed = s.speed ?? this.selfSpeed; this.mounted = s.mounted; });
+    net.on('worldBoss', wb => {
+      this.ui.setWorldBoss(wb);
+      if (wb.state === 'alive') { this.ui.announce(`🌋 ${wb.name} HAS AWOKEN!`, '#ff5b4d'); sfx.enrage(); }
+    });
+    net.on('worldBossStatus', list => this.ui.setWorldBossList(list));
+    this.shake = 0;
 
     this.animate();
   }
@@ -89,6 +95,7 @@ export class GameClient {
       if (document.activeElement?.tagName === 'INPUT') return;
       this.keys[e.code] = true;
       if (e.code === 'KeyM') this.minimap.toggleBig();
+      if (e.code === 'Space') { e.preventDefault(); this.net.emit('dodge'); }
       const slotKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'];
       const idx = slotKeys.indexOf(e.code);
       if (idx >= 0) this.cast(idx);
@@ -315,9 +322,35 @@ export class GameClient {
     switch (e.type) {
       case 'damage': {
         const ent = this.entities.get(e.targetId);
-        if (ent) this.spawnDamageNumber(ent, e.amount, e.crit ? '#ffd54f' : '#ffffff', e.crit);
+        if (ent) {
+          const healNum = e.amount < 0;
+          this.spawnDamageNumber(ent, healNum ? '+' + (-e.amount) : e.amount, healNum ? '#7cffb2' : e.crit ? '#ffd54f' : '#ffffff', e.crit);
+        }
         if (e.targetId === this.selfId) this.ui.flashHurt();
-        e.crit ? sfx.crit() : sfx.hit();
+        if (e.crit) { sfx.crit(); this.shake = 0.08; } else if (e.amount > 0) sfx.hit();
+        break;
+      }
+      case 'dodged': {
+        const ent = this.entities.get(e.targetId);
+        if (ent) this.spawnDamageNumber(ent, 'DODGE!', '#9ecbff', false);
+        break;
+      }
+      case 'sandstorm': {
+        this.ui.announce('🌪 SANDSTORM!', '#e9cd7a');
+        const oldFog = this.scene.fog;
+        this.scene.fog = new (oldFog.constructor)(0xd9bd75, 5, 30);
+        setTimeout(() => { this.scene.fog = oldFog; }, (e.sec || 10) * 1000);
+        sfx.enrage();
+        break;
+      }
+      case 'enchant': {
+        if (e.success) { this.ui.announce(`✨ ${e.name} +${e.level}!`, '#c084fc'); sfx.loot('epic'); }
+        else { this.ui.announce(`💔 Enchant failed (+1 shard, ${e.shards}/5)`, '#ff7675'); sfx.mobDeath(); }
+        break;
+      }
+      case 'daily': {
+        this.ui.announce(`🎁 Day ${e.streak} login: ${e.label}`, '#f5c542');
+        sfx.quest();
         break;
       }
       case 'healed': {
@@ -516,8 +549,10 @@ export class GameClient {
     const wx = ix * cos - iz * sin;
     const wz = ix * sin + iz * cos;
     if (wx || wz) this.face = Math.atan2(wx, wz);
-    const intent = { x: +wx.toFixed(3), z: +wz.toFixed(3), face: +(this.face || 0).toFixed(3) };
-    if (!this.lastIntent || this.lastIntent.x !== intent.x || this.lastIntent.z !== intent.z || Math.abs((this.lastIntent.face ?? 0) - intent.face) > 0.05) {
+    const sprint = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
+    const intent = { x: +wx.toFixed(3), z: +wz.toFixed(3), face: +(this.face || 0).toFixed(3), sprint };
+    if (!this.lastIntent || this.lastIntent.x !== intent.x || this.lastIntent.z !== intent.z ||
+        this.lastIntent.sprint !== sprint || Math.abs((this.lastIntent.face ?? 0) - intent.face) > 0.05) {
       this.net.emit('input', intent);
       this.lastIntent = intent;
     }
@@ -584,6 +619,11 @@ export class GameClient {
         ct.y + this.camDist * Math.sin(this.camPitch),
         ct.z + Math.cos(this.camAngle) * this.camDist * Math.cos(this.camPitch)
       );
+      if (this.shake > 0) {
+        this.shake -= dt;
+        this.camera.position.x += (Math.random() - 0.5) * 0.35;
+        this.camera.position.y += (Math.random() - 0.5) * 0.35;
+      }
       this.camera.lookAt(ct.x, ct.y + 2.2, ct.z);
       this.sun.position.set(ct.x + 40, ct.y + 80, ct.z + 20);
       this.sun.target.position.set(ct.x, ct.y, ct.z);

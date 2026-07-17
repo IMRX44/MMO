@@ -246,6 +246,60 @@ const MOB_BUILDERS = {
     g.userData.parts.armR.add(axe);
     return g;
   },
+  spider() {
+    const g = new THREE.Group();
+    g.add(box(1.1, 0.6, 1.3, 0x2c2233, 0, 0.7, 0));
+    const head = box(0.6, 0.5, 0.6, 0x3a2d44, 0, 0.75, 0.85);
+    head.add(box(0.1, 0.1, 0.05, 0xff5b5b, -0.15, 0.1, 0.31));
+    head.add(box(0.1, 0.1, 0.05, 0xff5b5b, 0.15, 0.1, 0.31));
+    head.add(box(0.08, 0.08, 0.05, 0xff5b5b, -0.22, -0.05, 0.31));
+    head.add(box(0.08, 0.08, 0.05, 0xff5b5b, 0.22, -0.05, 0.31));
+    g.add(head);
+    for (const s of [-1, 1]) for (let i = 0; i < 4; i++) {
+      const leg = box(1.1, 0.12, 0.12, 0x241b2e, s * 0.9, 0.55, 0.5 - i * 0.35);
+      leg.rotation.z = s * 0.5;
+      g.add(leg);
+    }
+    return g;
+  },
+  pharaoh() {
+    const g = MOB_BUILDERS.mummy();
+    // golden death mask + nemes headdress
+    g.userData.parts.head.add(box(0.85, 0.5, 0.85, 0x2456a8, 0, 0.3, 0));
+    g.userData.parts.head.add(box(0.87, 0.16, 0.87, 0xf5c542, 0, 0.05, 0));
+    g.userData.parts.head.add(box(0.2, 0.3, 0.1, 0xf5c542, 0, 0.5, 0.4)); // cobra
+    // golden collar + crook
+    g.add(box(1.0, 0.25, 0.6, 0xf5c542, 0, 2.05, 0));
+    const crook = box(0.1, 1.4, 0.1, 0xf5c542, 0, -0.9, 0.3);
+    crook.add(box(0.35, 0.1, 0.1, 0xf5c542, 0.15, 0.7, 0));
+    g.userData.parts.armR.add(crook);
+    g.userData.zombieArms = false;
+    return g;
+  },
+  groldan() {
+    // giant sand worm: rising segmented body + huge maw
+    const g = new THREE.Group();
+    const segs = [
+      [2.2, 0.0, 0], [2.0, 1.6, -0.5], [1.8, 3.0, -1.2], [1.6, 4.2, -2.2],
+    ];
+    for (const [size, y, z] of segs) {
+      const s = box(size, 1.5, size, 0xb9975a, 0, y + 0.75, z);
+      s.add(box(size + 0.05, 0.3, size + 0.05, 0x8a6d3c, 0, -0.4, 0));
+      g.add(s);
+    }
+    // maw
+    const head = box(2.4, 1.8, 2.4, 0x8a6d3c, 0, 1.2, 1.6);
+    head.add(box(1.8, 1.2, 0.4, 0x3a0d0d, 0, 0.1, 1.05)); // gullet
+    for (const x of [-0.7, -0.25, 0.25, 0.7]) {
+      head.add(box(0.22, 0.5, 0.2, 0xefe6d5, x, 0.75, 1.15));
+      head.add(box(0.22, 0.5, 0.2, 0xefe6d5, x, -0.6, 1.15));
+    }
+    head.add(box(0.2, 0.2, 0.1, 0xff9800, -0.6, 0.6, 1.21));
+    head.add(box(0.2, 0.2, 0.1, 0xff9800, 0.6, 0.6, 1.21));
+    g.add(head);
+    g.userData.hover = false;
+    return g;
+  },
   infernal() {
     const g = MOB_BUILDERS.golem();
     // burning crown of spikes

@@ -7,6 +7,8 @@ import {
   skillUpgradeCost, MAX_SKILL_LEVEL, PARTY_XP_RANGE, PARTY_XP_BONUS,
   PVP_BIOME, INVENTORY_SIZE, RESPEC_COST,
   GATHER, RECIPES, MOUNTS, CHESTS,
+  STAMINA, ENCHANT, PITY_SHARDS, itemTier, profLevel, PROF_GATES,
+  WORLD_BOSSES, DAILY_REWARDS,
 } from '../shared/constants.js';
 import {
   biomeAt, groundHeight, clampToWorld, HALF_WORLD, TILE, WATER_LEVEL, BIOMES,
@@ -51,6 +53,7 @@ export class GameServer {
 
     this.spawnWorldMobs();
     for (const dk of Object.keys(DUNGEONS)) this.spawnDungeonMobs(dk);
+    this.scheduleWorldBosses();
 
     setInterval(() => this.tick(1 / TICK_HZ), 1000 / TICK_HZ);
     setInterval(() => this.broadcast(), 1000 / NET_HZ);
@@ -79,6 +82,48 @@ export class GameServer {
   }
 
   static CLUCKS = ['قُدقُد 🐔', 'بوق بوق 🎺', 'من یه دلقک قانونی‌ام 🤡', 'قُدقُدقُدااا 🐔🐔', 'هونک هونک 📯'];
+
+  // --- world bosses ------------------------------------------------------------
+  scheduleWorldBosses() {
+    this.worldBossTimers = {};
+    for (const wb of Object.values(WORLD_BOSSES)) {
+      this.worldBossTimers[wb.id] = { nextAt: now() + wb.firstDelaySec, warned: false, mob: null };
+    }
+    setInterval(() => {
+      const t = now();
+      for (const wb of Object.values(WORLD_BOSSES)) {
+        const st = this.worldBossTimers[wb.id];
+        if (st.mob && !st.mob.dead) continue;
+        if (!st.warned && t >= st.nextAt - wb.warnSec) {
+          st.warned = true;
+          this.systemMsg(`⚠️ ${wb.name} stirs beneath the sands… it wakes in ${Math.round(wb.warnSec / 60)} minutes! (${Math.round(wb.spawn.x)}, ${Math.round(wb.spawn.z)})`);
+        }
+        if (t >= st.nextAt) {
+          st.nextAt = t + wb.periodSec;
+          st.warned = false;
+          const mob = this.addMob(wb.id, wb, 'world', wb.spawn.x, wb.spawn.z);
+          mob.isBoss = true;
+          mob.isWorldBoss = true;
+          mob.damageBy = new Map();
+          st.mob = mob;
+          this.systemMsg(`🌋 ${wb.name} HAS AWOKEN! Rally at (${Math.round(wb.spawn.x)}, ${Math.round(wb.spawn.z)})!`);
+          this.io.emit('worldBoss', { name: wb.name, state: 'alive', x: wb.spawn.x, z: wb.spawn.z });
+        }
+      }
+    }, 5000);
+  }
+
+  worldBossStatus() {
+    const t = now();
+    const out = [];
+    for (const wb of Object.values(WORLD_BOSSES)) {
+      const st = this.worldBossTimers?.[wb.id];
+      if (!st) continue;
+      if (st.mob && !st.mob.dead) out.push({ name: wb.name, state: 'alive', x: wb.spawn.x, z: wb.spawn.z });
+      else out.push({ name: wb.name, state: 'soon', inSec: Math.max(0, Math.round(st.nextAt - t)) });
+    }
+    return out;
+  }
 
   // --- spawning -------------------------------------------------------------
   spawnWorldMobs() {
@@ -135,10 +180,15 @@ export class GameServer {
     for (const p of this.players.values()) {
       if (p.charId === charId) return { error: 'Character already in game.' };
     }
-    // migrate older characters to v2 fields
+    // migrate older characters to v2/v3 fields
     char.materials ??= {};
     char.mounts ??= [];
     char.activeMount ??= null;
+    char.professions ??= {};   // kind -> xp
+    char.shards ??= 0;
+    char.tokens ??= 0;
+    char.loginStreak ??= 0;
+    char.lastLoginDay ??= 0;
     const d = derivedStats(char);
     const player = {
       socket, socketId: socket.id, username, charId, char,
@@ -158,10 +208,14 @@ export class GameServer {
       gatherCd: 0,
       suspicion: 0,
       clown: !!char.clown,
+      stamina: STAMINA.max, iframeUntil: 0, dodgeCdUntil: 0,
+      sprinting: false, lastCombatAt: 0,
       mounted: char.activeMount && char.mounts.includes(char.activeMount) ? char.activeMount : null,
     };
     this.players.set(socket.id, player);
     this.systemMsg(`${char.name} entered the world.`);
+    this.grantDailyReward(player);
+    setTimeout(() => socket.emit('worldBossStatus', this.worldBossStatus()), 800);
     return { player };
   }
 
@@ -193,7 +247,28 @@ export class GameServer {
     const len = Math.hypot(x, z);
     if (len > 1) { x /= len; z /= len; }
     p.input = { x, z };
+    p.sprinting = !!data.sprint;
     if (Number.isFinite(+face)) p.face = +face;
+  }
+
+  onDodge(p) {
+    const t = now();
+    if (p.dead || t < p.stunUntil) return;
+    if (t < p.dodgeCdUntil || p.stamina < STAMINA.dodgeCost) return;
+    p.stamina -= STAMINA.dodgeCost;
+    p.dodgeCdUntil = t + STAMINA.dodgeCd;
+    p.iframeUntil = t + STAMINA.iframeSec;
+    const len = Math.hypot(p.input.x, p.input.z);
+    const dx = len > 0.1 ? p.input.x / len : Math.sin(p.face);
+    const dz = len > 0.1 ? p.input.z / len : Math.cos(p.face);
+    let nx = p.x + dx * STAMINA.dodgeDist;
+    let nz = p.z + dz * STAMINA.dodgeDist;
+    [nx, nz] = this.clampToMap(p.map, nx, nz);
+    if (p.map !== 'world' || walkable(nx, nz)) {
+      this.effect(p.map, { kind: 'dash', from: { x: p.x, z: p.z }, to: { x: nx, z: nz } });
+      p.x = nx; p.z = nz;
+    }
+    this.emitSelf(p);
   }
 
   onCast(p, data) {
@@ -216,6 +291,7 @@ export class GameServer {
       ? { x: +data.point.x, z: +data.point.z } : null;
 
     if (p.mounted) this.setMount(p, null); // casting dismounts
+    p.lastCombatAt = t;
     const ok = this.executeSkill(p, skill, sLevel, target, point);
     if (!ok) return;
     p.mp -= skill.mp;
@@ -417,6 +493,7 @@ export class GameServer {
       const mob = target.e;
       dmg = Math.max(1, Math.round(dmg));
       mob.hp -= dmg;
+      if (mob.damageBy) mob.damageBy.set(p.socketId, (mob.damageBy.get(p.socketId) || 0) + dmg);
       if (skill.dotMult) {
         mob.dots.push({ dmg: rawDamage * skill.dotMult / (skill.dotSec || 4), ticksLeft: skill.dotSec || 4, interval: 1, elapsed: 0, srcId: p.socketId });
       }
@@ -440,6 +517,12 @@ export class GameServer {
 
   hurtPlayer(victim, dmg, sourceName, crit = false) {
     if (victim.dead) return;
+    const t = now();
+    if (t < victim.iframeUntil) { // dodged!
+      this.event(victim.map, { type: 'dodged', targetId: victim.socketId });
+      return;
+    }
+    victim.lastCombatAt = t;
     if (victim.mounted) this.setMount(victim, null); // knocked off your mount
     if (victim.shield > 0 && victim.shieldUntil > now()) {
       const absorbed = Math.min(victim.shield, dmg);
@@ -535,6 +618,29 @@ export class GameServer {
       killer.char.bossKills[mob.tpl.id] = (killer.char.bossKills[mob.tpl.id] || 0) + 1;
       this.systemMsg(`⚔️ ${mob.tpl.name} has been defeated by ${killer.char.name}'s party!`);
       mob.enraged = false;
+    }
+
+    // world boss: personal loot + valor tokens for every real contributor
+    if (mob.isWorldBoss && mob.damageBy) {
+      const threshold = mob.maxHp * (mob.tpl.shareThreshold || 0.02);
+      for (const [sid, dmgDone] of mob.damageBy) {
+        const contributor = this.players.get(sid);
+        if (!contributor || dmgDone < threshold) continue;
+        contributor.char.tokens = (contributor.char.tokens || 0) + 3;
+        if (contributor !== killer && contributor.char.inventory.length < INVENTORY_SIZE) {
+          const item = rollItem(mob.tpl.level * 1.2, mob.tpl.lootBonus);
+          contributor.char.inventory.push(item);
+          contributor.socket.emit('loot', { item });
+          this.emitInv(contributor);
+        }
+        contributor.socket.emit('event', { type: 'system', text: `🏅 +3 Valor Tokens for fighting ${mob.tpl.name}!` });
+        this.emitSelf(contributor);
+      }
+      this.systemMsg(`🌋 ${mob.tpl.name} falls! It will return in ${Math.round(mob.tpl.periodSec / 3600)}h.`);
+      mob.noRespawn = true; // scheduler spawns a fresh one next cycle
+      const st = this.worldBossTimers[mob.tpl.id];
+      if (st) st.mob = null;
+      this.io.emit('worldBoss', { name: mob.tpl.name, state: 'dead' });
     }
     markDirty();
   }
@@ -693,6 +799,13 @@ export class GameServer {
     const res = resourceAt(tx, tz);
     if (!res) { this.naughty(p, 3); return; } // coordinates that were never a node
     if (Math.hypot(tx * TILE - p.x, tz * TILE - p.z) > GATHER.range) return;
+    // profession tier gate (Albion model: skill up to unlock higher tiers)
+    const profXp = p.char.professions[res.kind] || 0;
+    const pLvl = profLevel(profXp);
+    if (pLvl < (PROF_GATES[res.tier] || 0)) {
+      p.socket.emit('event', { type: 'system', text: `Requires ${res.kind} level ${PROF_GATES[res.tier]} (you: ${pLvl}). Gather lower tiers to skill up!` });
+      return;
+    }
     const key = `${tx},${tz}`;
     let node = this.nodes.get(key);
     if (node && node.respawnAt && t >= node.respawnAt) node = null; // respawned
@@ -701,8 +814,10 @@ export class GameServer {
     node.uses++;
     p.gatherCd = t + GATHER.cooldown;
     const matKey = `${res.kind}${res.tier}`;
-    const qty = ri(GATHER.yieldMin, GATHER.yieldMax);
+    let qty = ri(GATHER.yieldMin, GATHER.yieldMax);
+    if (Math.random() < 0.02 * Math.floor(pLvl / 10)) qty *= 2; // profession double-proc
     p.char.materials[matKey] = (p.char.materials[matKey] || 0) + qty;
+    p.char.professions[res.kind] = profXp + 8 * res.tier;
     this.grantXp(p, GATHER.xpPerTier * res.tier);
     p.socket.emit('event', { type: 'gathered', mat: matKey, qty });
     if (node.uses >= GATHER.usesPerNode) {
@@ -747,6 +862,105 @@ export class GameServer {
     }
     p.socket.emit('event', { type: 'crafted', name: recipe.name });
     this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  findOwnedItem(p, itemId) {
+    const inInv = p.char.inventory.find(i => i.id === itemId);
+    if (inInv) return { item: inInv, equipped: false };
+    for (const slot of Object.keys(p.char.equipment)) {
+      if (p.char.equipment[slot]?.id === itemId) return { item: p.char.equipment[slot], equipped: true };
+    }
+    return null;
+  }
+
+  onEnchant(p, itemId) {
+    const found = this.findOwnedItem(p, itemId);
+    if (!found) { this.naughty(p, 1); return; }
+    const item = found.item;
+    const cur = item.enchant || 0;
+    if (cur >= ENCHANT.maxLevel) return;
+    const cfg = ENCHANT.tiers.find(tt => cur < tt.upTo);
+    const matKey = `bar${itemTier(item.level)}`;
+    const usePity = (p.char.shards || 0) >= PITY_SHARDS;
+    if (!usePity) {
+      const goldCost = cfg.gold * item.level;
+      if (p.char.gold < goldCost || (p.char.materials[matKey] || 0) < cfg.mats) {
+        p.socket.emit('event', { type: 'system', text: `Enchant needs ${goldCost}g + ${cfg.mats}× T${itemTier(item.level)} bars.` });
+        return;
+      }
+      p.char.gold -= goldCost;
+      p.char.materials[matKey] -= cfg.mats;
+    } else {
+      p.char.shards -= PITY_SHARDS;
+    }
+    const success = usePity || Math.random() < cfg.chance;
+    if (success) {
+      item.enchant = cur + 1;
+      p.socket.emit('event', { type: 'enchant', success: true, level: item.enchant, name: item.name });
+      if (item.enchant >= ENCHANT.maxLevel) {
+        this.systemMsg(`✨ ${p.char.name} enchanted ${item.name} to +10! LEGENDARY CRAFTSMANSHIP!`);
+      }
+    } else {
+      item.enchant = Math.max(0, cur - cfg.fail);
+      p.char.shards = (p.char.shards || 0) + 1;
+      p.socket.emit('event', { type: 'enchant', success: false, level: item.enchant, shards: p.char.shards, name: item.name });
+    }
+    if (found.equipped) {
+      p.derived = derivedStats(p.char);
+      p.hp = Math.min(p.hp, p.derived.maxHp);
+    }
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  onSalvage(p, itemId) {
+    const idx = p.char.inventory.findIndex(i => i.id === itemId);
+    if (idx === -1) return;
+    const [item] = p.char.inventory.splice(idx, 1);
+    const tier = itemTier(item.level);
+    const yields = {
+      weapon: ['bar', 'plank'], ring: ['bar', 'cloth'], amulet: ['bar', 'cloth'],
+      head: ['bar', 'leather'], chest: ['leather', 'cloth'], legs: ['leather', 'cloth'], boots: ['leather', 'block'],
+    }[item.slot] || ['bar', 'cloth'];
+    const bonus = { epic: 1, legendary: 2 }[item.rarity] || 0;
+    const gained = [];
+    for (const kind of yields) {
+      const q = ri(1, 2) + bonus;
+      const key = `${kind}${tier}`;
+      p.char.materials[key] = (p.char.materials[key] || 0) + q;
+      gained.push(`${q}× T${tier} ${kind}`);
+    }
+    p.socket.emit('event', { type: 'system', text: `♻️ Salvaged ${item.name} → ${gained.join(', ')}` });
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  grantDailyReward(p) {
+    const day = Math.floor(Date.now() / 86400000);
+    const c = p.char;
+    if (c.lastLoginDay === day) return;
+    c.loginStreak = (day - c.lastLoginDay === 1) ? (c.loginStreak || 0) + 1 : 1;
+    c.lastLoginDay = day;
+    const r = DAILY_REWARDS[(c.loginStreak - 1) % 7];
+    if (r.gold) c.gold += r.gold;
+    if (r.shards) c.shards = (c.shards || 0) + r.shards;
+    if (r.tokens) c.tokens = (c.tokens || 0) + r.tokens;
+    if (r.potions) for (const [k, q] of Object.entries(r.potions)) c.potions[k] = (c.potions[k] || 0) + q;
+    if (r.mats) {
+      const tier = Math.max(1, Math.min(5, Math.ceil(c.level / 12)));
+      const kind = ['wood', 'stone', 'ore', 'fiber', 'hide'][ri(0, 4)];
+      c.materials[`${kind}${tier}`] = (c.materials[`${kind}${tier}`] || 0) + 6;
+    }
+    if (r.box && c.inventory.length < INVENTORY_SIZE) {
+      const item = rollItem(Math.max(6, c.level * 1.1), { guaranteed: r.box });
+      c.inventory.push(item);
+      setTimeout(() => p.socket.emit('loot', { item }), 1500);
+    }
+    setTimeout(() => {
+      p.socket.emit('event', { type: 'daily', streak: c.loginStreak, label: r.label });
+      this.emitSelf(p); this.emitInv(p);
+    }, 1200);
     markDirty();
   }
 
@@ -994,6 +1208,11 @@ export class GameServer {
     p.hp = Math.min(p.derived.maxHp, p.hp + p.derived.hpRegen * dt);
     p.mp = Math.min(p.derived.maxMp, p.mp + p.derived.mpRegen * dt);
 
+    // stamina: drain while sprint-moving, regen otherwise
+    const sprintMoving = p.sprinting && (p.input.x || p.input.z) && !this.inCombat(p, t) && !p.mounted;
+    if (sprintMoving) p.stamina = Math.max(0, p.stamina - STAMINA.sprintCostPerSec * dt);
+    else p.stamina = Math.min(STAMINA.max, p.stamina + (this.inCombat(p, t) ? STAMINA.regenIn : STAMINA.regenOut) * dt);
+
     // HoTs
     for (const hot of p.hots) {
       hot.elapsed += dt;
@@ -1012,9 +1231,12 @@ export class GameServer {
     if (p.shieldUntil <= t) p.shield = 0;
   }
 
+  inCombat(p, t) { return t - p.lastCombatAt < STAMINA.combatSec; }
+
   effectiveSpeed(p, t) {
     let speed = p.derived.speed;
     if (p.mounted && MOUNTS[p.mounted]) speed *= MOUNTS[p.mounted].speedMult;
+    if (p.sprinting && p.stamina > 1 && !this.inCombat(p, t) && !p.mounted) speed *= STAMINA.sprintMult;
     if (p.slowUntil > t) speed *= 1 - p.slowPct / 100;
     const sb = p.buffs.speed;
     if (sb && sb.until > t) speed *= 1 + sb.pct / 100;
@@ -1052,7 +1274,8 @@ export class GameServer {
         mob.hp = mob.maxHp;
         mob.x = mob.spawnX; mob.z = mob.spawnZ;
         mob.state = 'idle'; mob.targetId = null;
-        mob.enraged = false; mob.addsSpawned = false; mob.dots = [];
+        mob.enraged = false; mob.wave = 0; mob.stormDone = false; mob.dots = [];
+        if (mob.damageBy) mob.damageBy = new Map();
       }
       return;
     }
@@ -1074,23 +1297,49 @@ export class GameServer {
     if (mob.dead) return;
     if (t < mob.stunUntil) return;
 
-    // boss phases: adds at 70%, enrage at tpl.enrageAt
-    if (mob.isBoss && !mob.addsSpawned && mob.hp / mob.maxHp <= 0.7) {
-      mob.addsSpawned = true;
-      const d = DUNGEONS[mob.dungeon];
-      for (let i = 0; i < 3; i++) {
-        const add = this.addMob(`${mob.dungeon}Add`, d.trash, mob.map, mob.x + ri(-4, 4), mob.z + ri(-4, 4));
-        add.noRespawn = true;
-        add.state = 'chase';
-        add.targetId = mob.targetId;
+    // boss phases: add waves at tpl.addsAt[], sandstorm, enrage
+    if (mob.isBoss) {
+      const frac = mob.hp / mob.maxHp;
+      const waves = mob.tpl.addsAt || [];
+      mob.wave = mob.wave || 0;
+      if (mob.wave < waves.length && frac <= waves[mob.wave] && mob.dungeon) {
+        mob.wave++;
+        const d = DUNGEONS[mob.dungeon];
+        for (let i = 0; i < 3; i++) {
+          const add = this.addMob(`${mob.dungeon}Add`, d.trash, mob.map, mob.x + ri(-4, 4), mob.z + ri(-4, 4));
+          add.noRespawn = true;
+          add.state = 'chase';
+          add.targetId = mob.targetId;
+          if (mob.tpl.addsHeal) { add.healsBossId = mob.id; add.nextHeal = t + 2; }
+        }
+        this.event(mob.map, { type: 'bossAdds', id: mob.id });
+        this.systemMsg(`💀 ${mob.tpl.name} summons reinforcements!${mob.tpl.addsHeal ? ' Kill the healers first!' : ''}`);
       }
-      this.event(mob.map, { type: 'bossAdds', id: mob.id });
-      this.systemMsg(`💀 ${mob.tpl.name} summons reinforcements!`);
+      if (mob.tpl.sandstormAt && !mob.stormDone && frac <= mob.tpl.sandstormAt) {
+        mob.stormDone = true;
+        for (const pl of this.players.values()) {
+          if (pl.map === mob.map && !pl.dead) this.applySlow(pl, 30, 10);
+        }
+        this.event(mob.map, { type: 'sandstorm', sec: 10 });
+        this.systemMsg(`🌪 A sandstorm engulfs the ziggurat!`);
+      }
+      if (!mob.enraged && frac <= mob.tpl.enrageAt) {
+        mob.enraged = true;
+        this.event(mob.map, { type: 'enrage', id: mob.id });
+        this.systemMsg(`🔥 ${mob.tpl.name} is ENRAGED!`);
+      }
     }
-    if (mob.isBoss && !mob.enraged && mob.hp / mob.maxHp <= mob.tpl.enrageAt) {
-      mob.enraged = true;
-      this.event(mob.map, { type: 'enrage', id: mob.id });
-      this.systemMsg(`🔥 ${mob.tpl.name} is ENRAGED!`);
+
+    // healer adds channel health back into their boss — priority targets
+    if (mob.healsBossId && t >= (mob.nextHeal || 0)) {
+      mob.nextHeal = t + 2;
+      const boss = this.mobs.get(mob.healsBossId);
+      if (boss && !boss.dead) {
+        const amount = Math.round(boss.maxHp * 0.008);
+        boss.hp = Math.min(boss.maxHp, boss.hp + amount);
+        this.event(mob.map, { type: 'damage', targetId: boss.id, amount: -amount, crit: false });
+        this.effect(mob.map, { kind: 'heal', at: { x: boss.x, z: boss.z } });
+      }
     }
 
     const target = mob.targetId ? this.players.get(mob.targetId) : null;
@@ -1197,6 +1446,9 @@ export class GameServer {
       shield: Math.round(p.shield),
       speed: +this.effectiveSpeed(p, t).toFixed(2),
       mounted: p.mounted,
+      stamina: Math.round(p.stamina), maxStamina: STAMINA.max,
+      dodgeCd: Math.max(0, +(p.dodgeCdUntil - t).toFixed(1)),
+      tokens: p.char.tokens || 0, shards: p.char.shards || 0,
       cooldowns: cds,
       dead: p.dead, respawnIn: p.dead ? Math.max(0, +(p.respawnAt - t).toFixed(1)) : 0,
       derived: {
@@ -1219,6 +1471,9 @@ export class GameServer {
       materials: p.char.materials,
       mounts: p.char.mounts,
       activeMount: p.char.activeMount,
+      professions: p.char.professions,
+      shards: p.char.shards || 0,
+      tokens: p.char.tokens || 0,
     });
   }
 

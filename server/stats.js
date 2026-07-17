@@ -1,7 +1,10 @@
 // Derived-stat computation. The single source of truth for a character's
 // combat numbers — recomputed server-side whenever level/points/gear change.
-import { CLASSES, STAT_EFFECTS, STAT_KEYS, SKILL_UPGRADE_BONUS } from '../shared/constants.js';
+import { CLASSES, STAT_EFFECTS, STAT_KEYS, SKILL_UPGRADE_BONUS, ENCHANT } from '../shared/constants.js';
 import { SPAWN } from '../shared/worldgen.js';
+
+// enchant levels multiply an item's numbers (+4%/level)
+const em = item => 1 + ENCHANT.bonusPerLevel * (item.enchant || 0);
 
 export function totalStats(char) {
   const cls = CLASSES[char.class];
@@ -14,7 +17,7 @@ export function totalStats(char) {
   for (const slot of Object.keys(char.equipment || {})) {
     const item = char.equipment[slot];
     if (!item) continue;
-    for (const k of STAT_KEYS) out[k] += item.stats?.[k] || 0;
+    for (const k of STAT_KEYS) out[k] += (item.stats?.[k] || 0) * em(item);
   }
   return out;
 }
@@ -26,11 +29,12 @@ export function derivedStats(char) {
   for (const slot of Object.keys(char.equipment || {})) {
     const it = char.equipment[slot];
     if (!it) continue;
-    bonusAttack += it.attack || 0;
-    bonusSpell += it.spell || 0;
-    bonusArmor += it.armor || 0;
-    bonusHp += it.hp || 0;
-    bonusMp += it.mp || 0;
+    const m = em(it);
+    bonusAttack += (it.attack || 0) * m;
+    bonusSpell += (it.spell || 0) * m;
+    bonusArmor += (it.armor || 0) * m;
+    bonusHp += (it.hp || 0) * m;
+    bonusMp += (it.mp || 0) * m;
   }
   const maxHp = Math.floor(cls.baseHp + cls.hpPerLevel * (char.level - 1) + s.vit * STAT_EFFECTS.vit.maxHp + bonusHp);
   const maxMp = Math.floor(cls.baseMp + cls.mpPerLevel * (char.level - 1) + s.int * STAT_EFFECTS.int.maxMp + bonusMp);

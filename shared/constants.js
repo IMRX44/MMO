@@ -153,9 +153,35 @@ export const DUNGEONS = {
       id: 'boneKing', name: 'Vharok, the Bone King', nameFa: 'وَهاروک، پادشاه استخوانی',
       level: 14, hp: 3600, damage: 55, xp: 2400, gold: [180, 320],
       speed: 5.5, aggro: 30, range: 3.4, scale: 2.6, model: 'boneKing',
-      enrageAt: 0.4, enrageMult: 1.6,
+      enrageAt: 0.4, enrageMult: 1.6, addsAt: [0.7],
       slam: { cooldown: 9, radius: 7, multiplier: 2.2 },
       lootBonus: { guaranteed: 'rare', epicChance: 0.25, legendaryChance: 0.04 },
+    },
+  },
+  hollow: {
+    name: 'Whispering Hollow', nameFa: 'گودال نجواگر',
+    minLevel: 14, entrance: { x: 300, z: 0 }, theme: 'forest',
+    trash: { model: 'spider', name: 'Duskweb Spider', level: 15, hp: 380, damage: 30, xp: 210, gold: [12, 24], speed: 7.5, aggro: 13, range: 2.2, scale: 1.0 },
+    boss: {
+      id: 'elderTreant', name: 'The Wailing Eldertree', nameFa: 'کهن‌درخت نالان',
+      level: 18, hp: 5200, damage: 62, xp: 3600, gold: [260, 450],
+      speed: 4.5, aggro: 30, range: 3.6, scale: 3.0, model: 'treant',
+      enrageAt: 0.3, enrageMult: 1.5, addsAt: [0.6], addsHeal: true,
+      slam: { cooldown: 8, radius: 6.5, multiplier: 2.0 },
+      lootBonus: { guaranteed: 'rare', epicChance: 0.35, legendaryChance: 0.06 },
+    },
+  },
+  ziggurat: {
+    name: 'Sunken Ziggurat', nameFa: 'زیگورات مدفون',
+    minLevel: 19, entrance: { x: 443, z: 231 }, theme: 'desert',
+    trash: { model: 'mummy', name: 'Tomb Guardian', level: 21, hp: 520, damage: 42, xp: 320, gold: [18, 34], speed: 5, aggro: 13, range: 2.3, scale: 1.1 },
+    boss: {
+      id: 'pharaoh', name: 'The Nameless Pharaoh', nameFa: 'فرعون بی‌نام',
+      level: 24, hp: 7800, damage: 78, xp: 5200, gold: [380, 650],
+      speed: 5.5, aggro: 32, range: 3.4, scale: 2.8, model: 'pharaoh',
+      enrageAt: 0.25, enrageMult: 1.6, addsAt: [0.66, 0.33], sandstormAt: 0.33,
+      slam: { cooldown: 8, radius: 7, multiplier: 2.2 },
+      lootBonus: { guaranteed: 'rare', epicChance: 0.5, legendaryChance: 0.08 },
     },
   },
   forge: {
@@ -166,7 +192,7 @@ export const DUNGEONS = {
       id: 'infernal', name: 'Kargath, Infernal Colossus', nameFa: 'کارگات، کلوسوس دوزخی',
       level: 32, hp: 11000, damage: 115, xp: 9000, gold: [600, 1000],
       speed: 6, aggro: 34, range: 4, scale: 3.4, model: 'infernal',
-      enrageAt: 0.35, enrageMult: 1.8,
+      enrageAt: 0.35, enrageMult: 1.8, addsAt: [0.7],
       slam: { cooldown: 7, radius: 9, multiplier: 2.5 },
       lootBonus: { guaranteed: 'epic', epicChance: 1, legendaryChance: 0.12 },
     },
@@ -273,6 +299,63 @@ export const CHESTS = {
   mats: t => 2 + Math.floor(Math.random() * 3),
   itemChance: 0.35,
 };
+
+// ---------------------------------------------------------------------------
+// Phase 2: stamina/dodge, enchanting, professions, world boss, daily rewards
+// ---------------------------------------------------------------------------
+export const STAMINA = {
+  max: 100, regenOut: 12, regenIn: 6,
+  dodgeCost: 25, dodgeCd: 3, dodgeDist: 5.5, iframeSec: 0.4,
+  sprintCostPerSec: 10, sprintMult: 1.35, combatSec: 4,
+};
+
+// Enchant tiers (per MASTER_PLAN 4.3). Cost gold is ×item.level; mats are
+// metal bars of the item's tier. Fail drops enchant by `fail` levels and
+// grants a pity shard; PITY_SHARDS shards buy one guaranteed free attempt.
+export const ENCHANT = {
+  maxLevel: 10, bonusPerLevel: 0.04,
+  tiers: [
+    { upTo: 3,  chance: 1.0,  gold: 50,  mats: 2, fail: 0 },
+    { upTo: 6,  chance: 0.6,  gold: 120, mats: 4, fail: 0 },
+    { upTo: 8,  chance: 0.35, gold: 300, mats: 6, fail: 1 },
+    { upTo: 10, chance: 0.15, gold: 800, mats: 8, fail: 2 },
+  ],
+};
+export const PITY_SHARDS = 5;
+export const itemTier = iLvl => Math.max(1, Math.min(5, Math.round(iLvl / 6)));
+
+// Gathering professions: per-kind XP and levels; higher tiers are gated.
+export function profLevel(xp) {
+  let lvl = 1, need = 25;
+  while (xp >= need && lvl < 100) { xp -= need; lvl++; need = Math.floor(25 * Math.pow(lvl, 1.35)); }
+  return lvl;
+}
+export const PROF_GATES = { 1: 0, 2: 0, 3: 20, 4: 40, 5: 60 }; // tier -> min prof level
+
+// World bosses: periodic open-world raid targets with shared participation loot.
+export const WORLD_BOSSES = {
+  groldan: {
+    id: 'groldan', name: 'Groldan, the Hungering Maw', nameFa: 'گرولدان، کامِ گرسنه',
+    model: 'groldan', level: 26, hp: 26000, damage: 95, xp: 5000, gold: [500, 900],
+    speed: 5, aggro: 40, range: 4.5, scale: 4.2,
+    spawn: { x: -105, z: 448 }, periodSec: 7200, firstDelaySec: 420, warnSec: 600,
+    enrageAt: 0.25, enrageMult: 1.5,
+    slam: { cooldown: 7, radius: 10, multiplier: 2.4 },
+    lootBonus: { guaranteed: 'rare', epicChance: 0.45, legendaryChance: 0.08 },
+    shareThreshold: 0.02, // ≥2% damage = personal loot roll
+  },
+};
+
+// 7-day rotating login rewards (index = streak % 7)
+export const DAILY_REWARDS = [
+  { potions: { hpPotion: 3, mpPotion: 2 }, label: '5 Potions' },
+  { gold: 100, label: '100 Gold' },
+  { shards: 3, label: '3 Pity Shards' },
+  { tokens: 5, label: '5 Valor Tokens' },
+  { box: 'rare', label: 'Rare Chest' },
+  { mats: true, label: 'Tier Materials' },
+  { box: 'epic', tokens: 5, label: 'EPIC Chest!' },
+];
 
 export const RESPAWN_SECONDS = { mob: 18, boss: 240, player: 5 };
 export const PARTY_XP_RANGE = 40;   // party members within this range share XP
