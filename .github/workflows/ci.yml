@@ -1,0 +1,29 @@
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Syntax check
+        run: |
+          for f in server/*.js shared/*.js client/js/*.js; do node --check "$f"; done
+      - name: Boot smoke test
+        run: |
+          node server/index.js &
+          SERVER_PID=$!
+          sleep 4
+          curl -sf http://localhost:3000/api/health | grep '"ok":true'
+          curl -sf -X POST http://localhost:3000/api/register \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ciuser","password":"secret123"}' | grep token
+          kill $SERVER_PID

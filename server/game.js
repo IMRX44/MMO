@@ -9,8 +9,9 @@ import {
   GATHER, RECIPES, MOUNTS, CHESTS,
   STAMINA, ENCHANT, PITY_SHARDS, itemTier, profLevel, PROF_GATES,
   WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE, GUILD, MARKET, NAME_RE,
-  TALENTS, TALENT_POINTS, TALENT_RESPEC_COST, ARENA,
+  TALENTS, TALENT_POINTS, TALENT_RESPEC_COST, ARENA, SEASON,
 } from '../shared/constants.js';
+import { track } from './telemetry.js';
 import {
   biomeAt, groundHeight, clampToWorld, HALF_WORLD, TILE, WATER_LEVEL, BIOMES,
   SPAWN, TOWN_RADIUS, inTown, walkable, resourceAt, structuresNear,
@@ -62,7 +63,12 @@ export class GameServer {
     setInterval(() => this.tickArenaQueue(), 3000);
     setInterval(() => this.tickWorldEvents(), 30_000);
 
-    setInterval(() => this.tick(1 / TICK_HZ), 1000 / TICK_HZ);
+    this.tickMsAvg = 0;
+    setInterval(() => {
+      const t0 = performance.now();
+      this.tick(1 / TICK_HZ);
+      this.tickMsAvg = this.tickMsAvg * 0.95 + (performance.now() - t0) * 0.05;
+    }, 1000 / TICK_HZ);
     setInterval(() => this.broadcast(), 1000 / NET_HZ);
     setInterval(() => markDirty(), 15_000);
     // suspicion decays for players who behave
@@ -223,8 +229,11 @@ export class GameServer {
       sprinting: false, lastCombatAt: 0,
       mounted: char.activeMount && char.mounts.includes(char.activeMount) ? char.activeMount : null,
     };
+    char.season ??= { id: SEASON.id, xp: 0, claimed: [] };
+    if (char.season.id !== SEASON.id) char.season = { id: SEASON.id, xp: 0, claimed: [] };
     this.players.set(socket.id, player);
     this.systemMsg(`${char.name} entered the world.`);
+    track('session_start', { char: char.name, level: char.level, class: char.class });
     this.grantDailyReward(player);
     setTimeout(() => socket.emit('worldBossStatus', this.worldBossStatus()), 800);
     return { player };
@@ -234,6 +243,7 @@ export class GameServer {
     const p = this.players.get(socketId);
     if (!p) return;
     if (p.trade) this.cancelTrade(p.trade, `${p.char.name} disconnected.`);
+    track('session_end', { char: p.char.name, level: p.char.level });
     this.persist(p);
     this.leaveParty(p, true);
     this.players.delete(socketId);
@@ -581,6 +591,7 @@ export class GameServer {
       victim.input = { x: 0, z: 0 };
       this.event(victim.map, { type: 'playerDeath', id: victim.socketId });
       this.systemMsg(`${victim.char.name} was slain by ${sourceName}.`);
+      track('death', { char: victim.char.name, level: victim.char.level, map: victim.map, x: Math.round(victim.x), z: Math.round(victim.z), by: sourceName });
     }
     this.emitSelf(victim);
   }
@@ -627,6 +638,7 @@ export class GameServer {
       m.char.gold += goldEach;
       this.progressQuest(m, mob);
       this.bumpDaily(m, 'kills');
+      this.grantSeasonXp(m, mob.tpl.level);
       this.emitSelf(m);
     }
 
@@ -681,6 +693,8 @@ export class GameServer {
       killer.char.bossKills[mob.tpl.id] = (killer.char.bossKills[mob.tpl.id] || 0) + 1;
       this.systemMsg(`⚔️ ${mob.tpl.name} has been defeated by ${killer.char.name}'s party!`);
       mob.enraged = false;
+      this.grantSeasonXp(killer, 100);
+      track('boss_kill', { boss: mob.tpl.id, by: killer.char.name });
       // rare mount drop (e.g. Frost Whelp from Iceborn)
       const md = mob.tpl.mountDrop;
       if (md && Math.random() < md.chance && !killer.char.mounts.includes(md.id)) {
@@ -737,6 +751,7 @@ export class GameServer {
       p.mp = p.derived.maxMp;
       this.event(p.map, { type: 'levelup', id: p.socketId, level: c.level });
       this.systemMsg(`🎉 ${c.name} reached level ${c.level}!`);
+      track('level_up', { char: c.name, level: c.level });
     }
   }
 
@@ -764,6 +779,7 @@ export class GameServer {
     c.quests.progress = 0;
     c.gold += q.reward.gold;
     this.grantXp(p, q.reward.xp);
+    this.grantSeasonXp(p, 25);
     p.socket.emit('event', { type: 'questComplete', name: q.name, reward: q.reward });
   }
 
@@ -806,6 +822,7 @@ export class GameServer {
     d.claimed.push(id);
     p.char.gold += dq.reward.gold;
     p.char.tokens = (p.char.tokens || 0) + dq.reward.tokens;
+    this.grantSeasonXp(p, 30);
     p.socket.emit('event', { type: 'questComplete', name: dq.name, reward: dq.reward });
     this.emitSelf(p); this.emitInv(p);
     markDirty();
@@ -968,6 +985,7 @@ export class GameServer {
     p.char.materials[matKey] = (p.char.materials[matKey] || 0) + qty;
     p.char.professions[res.kind] = profXp + 8 * res.tier;
     this.bumpDaily(p, 'gathers');
+    this.grantSeasonXp(p, 1);
     this.grantXp(p, GATHER.xpPerTier * res.tier);
     p.socket.emit('event', { type: 'gathered', mat: matKey, qty });
     if (node.uses >= GATHER.usesPerNode) {
@@ -1011,6 +1029,7 @@ export class GameServer {
       p.socket.emit('loot', { item });
     }
     p.socket.emit('event', { type: 'crafted', name: recipe.name });
+    track('craft', { recipe: recipe.id, char: p.char.name });
     // craft-type quests
     const q = p.char.quests.active && QUESTS.find(x => x.id === p.char.quests.active);
     if (q?.craft && (q.craft === 'any' || q.craft === recipe.group)) this.bumpQuest(p, q);
@@ -1270,6 +1289,49 @@ export class GameServer {
     }
   }
 
+  // --- season pass (free) -----------------------------------------------------------
+  seasonLevel(season) {
+    let xp = season.xp, l = 0;
+    while (l < SEASON.maxLevel && xp >= SEASON.xpForLevel(l + 1)) { xp -= SEASON.xpForLevel(l + 1); l++; }
+    return l;
+  }
+
+  grantSeasonXp(p, amount) {
+    if (!p.char.season) return;
+    const before = this.seasonLevel(p.char.season);
+    p.char.season.xp += amount;
+    const after = this.seasonLevel(p.char.season);
+    if (after > before) {
+      p.socket.emit('event', { type: 'system', text: `🎫 Season level ${after}! Claim your reward in the quest panel [J].` });
+    }
+  }
+
+  onClaimSeason(p) {
+    const s = p.char.season;
+    if (!s) return;
+    const cur = this.seasonLevel(s);
+    let claimed = 0;
+    for (let l = 1; l <= cur; l++) {
+      if (s.claimed.includes(l)) continue;
+      s.claimed.push(l);
+      claimed++;
+      const r = SEASON.reward(l);
+      if (r.gold) p.char.gold += r.gold;
+      if (r.tokens) p.char.tokens = (p.char.tokens || 0) + r.tokens;
+      if (r.shards) p.char.shards = (p.char.shards || 0) + r.shards;
+      if (r.box && p.char.inventory.length < INVENTORY_SIZE) {
+        const item = rollItem(Math.max(6, p.char.level * 1.1), { guaranteed: r.box });
+        p.char.inventory.push(item);
+        p.socket.emit('loot', { item });
+      }
+    }
+    if (claimed) {
+      p.socket.emit('event', { type: 'system', text: `🎫 Claimed ${claimed} season reward${claimed > 1 ? 's' : ''}!` });
+      this.emitSelf(p); this.emitInv(p);
+      markDirty();
+    }
+  }
+
   // --- talents ---------------------------------------------------------------------
   talentsSpent(char) {
     return Object.values(char.talents || {}).reduce((a, b) => a + b, 0);
@@ -1365,6 +1427,7 @@ export class GameServer {
       loser.char.arenaLosses++;
       winner.char.tokens = (winner.char.tokens || 0) + 2;
       this.systemMsg(`🏆 ${winner.char.name} defeats ${loser.char.name} in the arena! (+${delta} rating → ${winner.char.arenaRating})`);
+      track('arena', { winner: winner.char.name, loser: loser.char.name });
     }
     const arenaId = loser.map;
     for (const id of match.ids) {
@@ -1595,6 +1658,7 @@ export class GameServer {
         }
       }
       p.socket.emit('event', { type: 'system', text: `Bought ${order.item.name} for ${order.price}g.` });
+      track('market_buy', { item: order.item.name, price: order.price });
       this.emitSelf(p); this.emitInv(p);
       this.onMarket(p, { action: 'list' });
       markDirty();
@@ -2136,6 +2200,11 @@ export class GameServer {
       talents: p.char.talents,
       talentPoints: TALENT_POINTS(p.char.level) - this.talentsSpent(p.char),
       arena: { rating: p.char.arenaRating, wins: p.char.arenaWins, losses: p.char.arenaLosses },
+      season: p.char.season ? {
+        xp: p.char.season.xp,
+        level: this.seasonLevel(p.char.season),
+        claimed: p.char.season.claimed,
+      } : null,
     });
   }
 

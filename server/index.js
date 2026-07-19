@@ -5,6 +5,7 @@ import express from 'express';
 import { Server } from 'socket.io';
 
 import { load as loadDb, db, markDirty } from './db.js';
+import { summary as telemetrySummary, track } from './telemetry.js';
 import { register, login, authFromToken, logout } from './auth.js';
 import { newCharacterState } from './stats.js';
 import { GameServer } from './game.js';
@@ -13,9 +14,10 @@ import { CLASSES, NAME_RE } from '../shared/constants.js';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 3000;
 
-loadDb();
+await loadDb();
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '16kb' }));
 app.use(express.static(path.join(ROOT, 'client')));
 app.use('/shared', express.static(path.join(ROOT, 'shared')));
@@ -104,6 +106,20 @@ app.get('/api/online', (req, res) => {
   res.json({ online: game.players.size });
 });
 
+// operational health + KPI counters (MASTER_PLAN §17/§18)
+const bootAt = Date.now();
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    uptimeSec: Math.round((Date.now() - bootAt) / 1000),
+    players: game.players.size,
+    mobs: game.mobs.size,
+    tickMsAvg: +(game.tickMsAvg || 0).toFixed(2),
+    memMB: Math.round(process.memoryUsage().rss / 1e6),
+    telemetry: telemetrySummary(),
+  });
+});
+
 app.get('/api/leaderboard', (req, res) => {
   const top = Object.values(db.characters)
     .sort((a, b) => b.level - a.level || b.xp - a.xp)
@@ -154,6 +170,7 @@ io.on('connection', socket => {
   socket.on('acceptQuest',  guard(d => game.onAcceptQuest(player, String(d?.questId))));
   socket.on('turnInQuest',  guard(() => game.onTurnInQuest(player)));
   socket.on('claimDaily',   guard(d => game.onClaimDaily(player, String(d?.id))));
+  socket.on('claimSeason',  guard(() => game.onClaimSeason(player)));
   socket.on('shrine',       guard(() => game.onShrine(player)));
   socket.on('trade',        guard(d => game.onTradeAction(player, d)));
   socket.on('guild',        guard(d => game.onGuild(player, d)));

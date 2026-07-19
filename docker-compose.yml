@@ -1,0 +1,42 @@
+# VoxelFall Online — production stack
+# Quick start on any VPS:   docker compose up -d
+# With a domain (auto-TLS): set DOMAIN=play.example.com first.
+services:
+  game:
+    build: .
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      # uncomment to switch persistence from JSON file to PostgreSQL:
+      # - DATABASE_URL=postgres://voxelfall:voxelfall@db:5432/voxelfall
+    volumes:
+      - game-data:/app/data
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=voxelfall
+      - POSTGRES_PASSWORD=voxelfall
+      - POSTGRES_DB=voxelfall
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  game-data:
+  pg-data:
+  caddy-data:

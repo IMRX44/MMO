@@ -2,7 +2,7 @@
 import {
   CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS,
   RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS, profLevel, DAILY_QUESTS,
-  TALENTS,
+  TALENTS, SEASON,
 } from '/shared/constants.js';
 import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
@@ -449,6 +449,25 @@ export class UI {
     const q = this.inv?.quests;
     if (!q) return;
     list.innerHTML = '';
+
+    // season pass
+    const season = this.inv.season;
+    if (season) {
+      const need = SEASON.xpForLevel(season.level + 1);
+      let intoLevel = season.xp;
+      for (let l = 1; l <= season.level; l++) intoLevel -= SEASON.xpForLevel(l);
+      const claimable = season.level - season.claimed.length;
+      const head = document.createElement('div');
+      head.className = 'quest-row';
+      head.innerHTML = `
+        <div class="q-name" style="color:var(--xp)">🎫 ${SEASON.name}</div>
+        <div class="q-meta">Level ${season.level}/${SEASON.maxLevel} · ${Math.min(intoLevel, need)}/${need} XP
+          — next: ${SEASON.reward(Math.min(SEASON.maxLevel, season.level + 1)).label}</div>
+        <div class="bar xp" style="margin-top:4px"><div class="fill" style="width:${Math.min(100, intoLevel / need * 100)}%"></div></div>
+        ${claimable > 0 ? `<button class="btn-small" id="season-claim" style="margin-top:6px">🎁 Claim ${claimable} reward${claimable > 1 ? 's' : ''}!</button>` : ''}`;
+      list.appendChild(head);
+      head.querySelector('#season-claim')?.addEventListener('click', () => this.net.emit('claimSeason'));
+    }
 
     // dailies
     const daily = this.inv.daily;

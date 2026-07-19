@@ -358,6 +358,19 @@ export const TALENTS = {
   ],
 };
 
+// Free season pass: 50 levels, XP from playing, cosmetic/token rewards only.
+export const SEASON = {
+  id: 'season1', name: 'Season 1: The Awakening',
+  maxLevel: 50,
+  xpForLevel: l => 100 + l * 40,
+  reward: l => {
+    if (l === 50) return { box: 'epic', tokens: 20, label: 'EPIC chest + 20 🏅' };
+    if (l % 10 === 0) return { box: 'rare', label: 'Rare chest' };
+    if (l % 5 === 0) return { shards: 2, label: '2 💠 shards' };
+    return l % 2 === 0 ? { tokens: 2, label: '2 🏅 tokens' } : { gold: 50 + l * 10, label: `${50 + l * 10}g` };
+  },
+};
+
 // Arena (1v1, Elo rating)
 export const ARENA = { startRating: 1000, k: 32, size: 22, countdownSec: 3 };
 
