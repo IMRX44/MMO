@@ -300,6 +300,37 @@ const MOB_BUILDERS = {
     g.userData.hover = false;
     return g;
   },
+  frostdragon() {
+    const g = new THREE.Group();
+    // body + neck + head
+    g.add(box(2.4, 1.3, 3.2, 0x9fc7e8, 0, 1.4, 0));
+    const neck = box(0.9, 1.6, 0.9, 0x8db8dd, 0, 2.6, 1.6);
+    neck.rotation.x = -0.35;
+    g.add(neck);
+    const head = box(0.95, 0.8, 1.5, 0x9fc7e8, 0, 3.4, 2.3);
+    head.add(box(0.2, 0.2, 0.1, 0x1b4f72, -0.25, 0.15, 0.72));
+    head.add(box(0.2, 0.2, 0.1, 0x1b4f72, 0.25, 0.15, 0.72));
+    head.add(box(0.16, 0.5, 0.16, 0xdff1fb, -0.3, 0.6, -0.3)); // horns
+    head.add(box(0.16, 0.5, 0.16, 0xdff1fb, 0.3, 0.6, -0.3));
+    g.add(head);
+    // ice wings
+    const wingMat = new THREE.MeshLambertMaterial({ color: 0xbfe3f7, transparent: true, opacity: 0.75 });
+    for (const s of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.12, 1.8), wingMat);
+      wing.position.set(s * 2.2, 2.3, -0.3);
+      wing.rotation.z = s * 0.35;
+      g.add(wing);
+    }
+    // tail + spikes + legs
+    const tail = box(0.5, 0.5, 2.2, 0x8db8dd, 0, 1.3, -2.4);
+    tail.rotation.x = 0.25;
+    g.add(tail);
+    for (let i = 0; i < 4; i++) g.add(box(0.2, 0.5, 0.2, 0xdff1fb, 0, 2.2, 0.9 - i * 0.7));
+    for (const [x, z] of [[-0.8, 1.0], [0.8, 1.0], [-0.8, -1.0], [0.8, -1.0]]) {
+      g.add(box(0.4, 1.0, 0.4, 0x7aa8cf, x, 0.5, z));
+    }
+    return g;
+  },
   infernal() {
     const g = MOB_BUILDERS.golem();
     // burning crown of spikes
@@ -424,6 +455,17 @@ const MOUNT_BUILDERS = {
   horse: () => quadruped({ body: 0x8d6748, mane: 0x4a3220, legs: 0x6e4f36 }),
   direwolf: () => quadruped({ body: 0x5d6d7e, mane: 0x2c3e50, legs: 0x46586a }),
   magmasteed: () => quadruped({ body: 0x3a2b2b, mane: 0x1f1515, legs: 0x2b1d1d, glow: 0xff5722 }),
+  frostwhelp: () => {
+    const g = quadruped({ body: 0x9fc7e8, mane: 0xdff1fb, legs: 0x7aa8cf, glow: 0x74d0f1 });
+    const wingMat = new THREE.MeshLambertMaterial({ color: 0xbfe3f7, transparent: true, opacity: 0.75 });
+    for (const s of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 1.1), wingMat);
+      wing.position.set(s * 1.3, 1.7, -0.2);
+      wing.rotation.z = s * 0.4;
+      g.add(wing);
+    }
+    return g;
+  },
 };
 
 export function createMount(name) {

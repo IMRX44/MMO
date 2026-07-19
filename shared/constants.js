@@ -184,6 +184,21 @@ export const DUNGEONS = {
       lootBonus: { guaranteed: 'rare', epicChance: 0.5, legendaryChance: 0.08 },
     },
   },
+  glacier: {
+    name: 'Glacier Heart', nameFa: 'قلب یخچال',
+    minLevel: 28, entrance: { x: 8, z: 700 }, theme: 'snow',
+    trash: { model: 'wraith', name: 'Frozen Shade', level: 29, hp: 780, damage: 66, xp: 560, gold: [28, 52], speed: 8.5, aggro: 14, range: 2.4, scale: 1.15 },
+    boss: {
+      id: 'iceborn', name: 'Iceborn, the Glacier Dragon', nameFa: 'ایسبورن، اژدهای یخچال',
+      level: 32, hp: 14000, damage: 100, xp: 9500, gold: [600, 1100],
+      speed: 6, aggro: 34, range: 4, scale: 3.2, model: 'frostdragon',
+      enrageAt: 0.3, enrageMult: 1.6, addsAt: [0.6],
+      slam: { cooldown: 9, radius: 8, multiplier: 2.3 },
+      blizzard: { cooldown: 14, count: 3, radius: 4.5, multiplier: 1.8 },
+      mountDrop: { id: 'frostwhelp', chance: 0.05 },
+      lootBonus: { guaranteed: 'epic', epicChance: 1, legendaryChance: 0.1 },
+    },
+  },
   forge: {
     name: 'Molten Forge Depths', nameFa: 'اعماق کوره‌ی مذاب',
     minLevel: 24, entrance: { x: -57, z: -914 },
@@ -239,6 +254,21 @@ export const MOUNTS = {
   horse:      { name: 'Riding Horse',  nameFa: 'اسب',          speedMult: 1.6, model: 'horse',      scale: 1.0 },
   direwolf:   { name: 'Direwolf',      nameFa: 'گرگ وحشی',     speedMult: 1.9, model: 'direwolf',   scale: 1.1 },
   magmasteed: { name: 'Magma Steed',   nameFa: 'اسب مذاب',     speedMult: 2.3, model: 'magmasteed', scale: 1.15 },
+  frostwhelp: { name: 'Frost Whelp',   nameFa: 'بچه‌اژدهای یخ', speedMult: 2.1, model: 'frostwhelp', scale: 1.0 },
+};
+
+// Guilds (Phase 3): shared identity, bank, level perks.
+export const GUILD = {
+  createCost: 500, maxMembers: 30,
+  xpPerLevel: lvl => 500 * lvl * lvl,        // guild xp needed for level lvl+1
+  xpBonusPerLevel: 1, xpBonusCap: 10,        // +1%/level member XP, max +10%
+  ranks: ['leader', 'officer', 'member'],
+};
+
+// Town market: player order book, Albion-style economy heart.
+export const MARKET = {
+  taxPct: 5, maxOrders: 12, maxPrice: 1_000_000,
+  minPrice: item => Math.max(1, item.sellValue), // can't dump below NPC value
 };
 
 // Recipes: generated tables the UI renders and the server validates.

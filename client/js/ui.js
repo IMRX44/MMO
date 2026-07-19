@@ -27,6 +27,9 @@ export class UI {
     net.on('tradeInvite', t => this.onTradeInvite(t));
     net.on('tradeState', t => this.onTradeState(t));
     net.on('tradeDone', t => this.onTradeDone(t));
+    net.on('guildState', g => { this.guild = g; this.renderGuild(); });
+    net.on('guildInvite', g => this.onGuildInvite(g));
+    net.on('marketState', m => { this.market = m; this.renderMarket(); });
 
     // panels
     document.querySelectorAll('#menu-buttons button').forEach(btn => {
@@ -42,6 +45,8 @@ export class UI {
       if (e.code === 'KeyK') this.togglePanel('panel-skills');
       if (e.code === 'KeyJ') this.togglePanel('panel-quests');
       if (e.code === 'KeyV') this.togglePanel('panel-craft');
+      if (e.code === 'KeyG') this.togglePanel('panel-guild');
+      if (e.code === 'KeyP') this.togglePanel('panel-market');
     });
 
     // settings sliders
@@ -116,6 +121,8 @@ export class UI {
       if (id === 'panel-skills') this.renderSkills();
       if (id === 'panel-quests') this.renderQuests();
       if (id === 'panel-craft') this.renderCraft();
+      if (id === 'panel-guild') { this.net.emit('guild', { action: 'info' }); this.renderGuild(); }
+      if (id === 'panel-market') { this.marketSellMode = false; this.net.emit('market', { action: 'list' }); }
     }
   }
   closePanels() { document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden')); }
@@ -588,6 +595,127 @@ export class UI {
     $('panel-trade').classList.add('hidden');
     if (!t.ok && t.reason) this.chatLine({ from: 'System', text: t.reason, channel: 'system' });
     if (t.ok) sfx.coin();
+  }
+
+  // --- guild -------------------------------------------------------------------
+  onGuildInvite(g) {
+    const toast = $('party-toast');
+    toast.classList.remove('hidden');
+    toast.innerHTML = `<b>${g.from}</b> invited you to guild <b>&lt;${g.guild}&gt;</b><br>
+      <button class="btn-primary" id="gi-accept">Join</button>
+      <button class="btn-small" id="gi-decline">Decline</button>`;
+    $('gi-accept').addEventListener('click', () => { this.net.emit('guild', { action: 'accept' }); toast.classList.add('hidden'); });
+    $('gi-decline').addEventListener('click', () => toast.classList.add('hidden'));
+    setTimeout(() => toast.classList.add('hidden'), 30000);
+  }
+
+  renderGuild() {
+    const body = $('guild-body');
+    if (!body) return;
+    const g = this.guild;
+    if (!g) {
+      body.innerHTML = `
+        <div style="padding:14px">
+          <div class="tt-muted" style="margin-bottom:10px">You are not in a guild. Found one (500g) or get invited.</div>
+          <div class="name-row" style="width:100%">
+            <input id="guild-name-input" type="text" placeholder="Guild name" maxlength="16" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--panel-border);background:#0d1120;color:var(--text)">
+            <button id="guild-create" class="btn-small">Found (500g)</button>
+          </div>
+        </div>`;
+      $('guild-create').addEventListener('click', () =>
+        this.net.emit('guild', { action: 'create', name: $('guild-name-input').value }));
+      return;
+    }
+    body.innerHTML = `
+      <div style="padding:12px 14px">
+        <div class="q-name" style="font-size:16px">&lt;${g.name}&gt; <span class="lvl">Lv ${g.level}</span></div>
+        <div class="tt-muted" style="font-size:12px">XP ${g.xp} / next ${g.nextXp} · +${Math.min(10, g.level - 1)}% member XP</div>
+        <div style="margin:6px 0;font-size:13px">📜 ${escapeHtml(g.motd || '')}</div>
+        <div class="q-name" style="margin-top:6px">🏦 Bank: ${g.bank}g</div>
+        <div style="display:flex;gap:6px;margin:6px 0">
+          <input id="gb-amount" type="number" min="1" value="10" style="width:80px;padding:5px;border-radius:6px;border:1px solid var(--panel-border);background:#0d1120;color:var(--text)">
+          <button class="btn-small" id="gb-dep">Deposit</button>
+          <button class="btn-small" id="gb-wd">Withdraw</button>
+        </div>
+        <div class="q-name" style="margin-top:8px">Members (${g.members.length})</div>
+        ${g.members.map(m => `<div class="stat-row" style="font-size:13px">
+          <span>${m.online ? '🟢' : '⚫'} ${m.name} <span class="tt-muted">Lv${m.level}</span></span>
+          <span class="tt-muted">${m.rank}</span></div>`).join('')}
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input id="g-target" type="text" placeholder="player name" style="flex:1;padding:5px;border-radius:6px;border:1px solid var(--panel-border);background:#0d1120;color:var(--text)">
+          <button class="btn-small" id="g-inv">Invite</button>
+          <button class="btn-small" id="g-promote">Rank±</button>
+          <button class="btn-small" id="g-kick">Kick</button>
+        </div>
+        <div class="tt-muted" style="font-size:11px;margin-top:8px">${(g.log || []).slice(-6).map(escapeHtml).join('<br>')}</div>
+        <button class="btn-small" id="g-leave" style="margin-top:8px;color:#ff7675">Leave guild</button>
+        <div class="tt-muted" style="font-size:11px;margin-top:4px">Guild chat: /g message</div>
+      </div>`;
+    const val = () => $('g-target').value.trim();
+    $('gb-dep').addEventListener('click', () => this.net.emit('guild', { action: 'deposit', amount: +$('gb-amount').value }));
+    $('gb-wd').addEventListener('click', () => this.net.emit('guild', { action: 'withdraw', amount: +$('gb-amount').value }));
+    $('g-inv').addEventListener('click', () => this.net.emit('guild', { action: 'invite', name: val() }));
+    $('g-promote').addEventListener('click', () => this.net.emit('guild', { action: 'promote', name: val() }));
+    $('g-kick').addEventListener('click', () => this.net.emit('guild', { action: 'kick', name: val() }));
+    $('g-leave').addEventListener('click', () => { if (confirm('Leave guild?')) this.net.emit('guild', { action: 'leave' }); });
+  }
+
+  // --- market ------------------------------------------------------------------
+  renderMarket() {
+    const body = $('market-body');
+    if (!body) return;
+    const m = this.market;
+    if (!m) { body.innerHTML = '<div class="tt-muted" style="padding:14px">Loading…</div>'; return; }
+    body.innerHTML = `
+      <div style="padding:10px 14px">
+        <button class="btn-small" id="mk-sell-mode">${this.marketSellMode ? '← Back to listings' : '＋ Sell an item'}</button>
+        <div id="mk-list" style="margin-top:8px;max-height:340px;overflow-y:auto"></div>
+      </div>`;
+    $('mk-sell-mode').addEventListener('click', () => { this.marketSellMode = !this.marketSellMode; this.renderMarket(); });
+    const list = $('mk-list');
+    if (this.marketSellMode) {
+      const items = this.inv?.inventory || [];
+      if (!items.length) { list.innerHTML = '<div class="tt-muted">Your bag is empty.</div>'; return; }
+      for (const item of items) {
+        const r = RARITIES[item.rarity];
+        const row = document.createElement('div');
+        row.className = 'craft-row';
+        row.innerHTML = `
+          <div class="cr-icon">${this.itemIcon(item)}</div>
+          <div class="cr-body"><div class="cr-name" style="color:${r.color}">${item.name}${item.enchant ? ' +' + item.enchant : ''}</div>
+          <div class="tt-muted" style="font-size:11px">min ${Math.max(1, item.sellValue)}g</div></div>
+          <input type="number" class="mk-price" value="${item.sellValue * 3}" min="1" style="width:70px;padding:4px;border-radius:6px;border:1px solid var(--panel-border);background:#0d1120;color:var(--text)">
+          <button class="btn-small mk-do-sell" data-id="${item.id}">List</button>`;
+        row.querySelector('.mk-do-sell').addEventListener('click', () => {
+          this.net.emit('market', { action: 'sell', itemId: item.id, price: +row.querySelector('.mk-price').value });
+          this.marketSellMode = false;
+        });
+        list.appendChild(row);
+      }
+      return;
+    }
+    if (!m.orders.length) { list.innerHTML = '<div class="tt-muted">No listings yet — be the first!</div>'; return; }
+    for (const o of m.orders) {
+      const r = RARITIES[o.item.rarity];
+      const row = document.createElement('div');
+      row.className = 'craft-row';
+      row.innerHTML = `
+        <div class="cr-icon">${this.itemIcon(o.item)}</div>
+        <div class="cr-body">
+          <div class="cr-name" style="color:${r.color}">${o.item.name}${o.item.enchant ? ' +' + o.item.enchant : ''}</div>
+          <div class="tt-muted" style="font-size:11px">iLvl ${o.item.level} · by ${o.seller}</div>
+        </div>
+        <span style="color:var(--gold);font-weight:700">${o.price}g</span>
+        ${o.mine
+          ? `<button class="btn-small mk-cancel" data-id="${o.id}">Cancel</button>`
+          : `<button class="btn-small mk-buy" data-id="${o.id}">Buy</button>`}`;
+      const item = o.item;
+      row.querySelector('.cr-icon').addEventListener('mouseenter', () => this.showItemTooltip(item, ''));
+      row.querySelector('.cr-icon').addEventListener('mouseleave', () => this.hideTooltip());
+      row.querySelector('.mk-buy')?.addEventListener('click', () => this.net.emit('market', { action: 'buy', orderId: o.id }));
+      row.querySelector('.mk-cancel')?.addEventListener('click', () => this.net.emit('market', { action: 'cancel', orderId: o.id }));
+      list.appendChild(row);
+    }
   }
 
   // --- world boss timer -------------------------------------------------------

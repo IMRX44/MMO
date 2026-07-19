@@ -8,7 +8,7 @@ import {
   PVP_BIOME, INVENTORY_SIZE, RESPEC_COST,
   GATHER, RECIPES, MOUNTS, CHESTS,
   STAMINA, ENCHANT, PITY_SHARDS, itemTier, profLevel, PROF_GATES,
-  WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE,
+  WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE, GUILD, MARKET, NAME_RE,
 } from '../shared/constants.js';
 import {
   biomeAt, groundHeight, clampToWorld, HALF_WORLD, TILE, WATER_LEVEL, BIOMES,
@@ -581,6 +581,18 @@ export class GameServer {
       this.emitSelf(m);
     }
 
+    // guild XP from the killer's guild
+    const kGuild = this.guildOf(killer.char);
+    if (kGuild) {
+      const before = this.guildLevel(kGuild);
+      kGuild.xp += mob.tpl.level;
+      const after = this.guildLevel(kGuild);
+      if (after > before) {
+        this.systemMsg(`🏰 Guild <${kGuild.name}> reached level ${after}! (+${Math.min(GUILD.xpBonusCap, (after - 1))}% member XP)`);
+        this.emitGuild(kGuild);
+      }
+    }
+
     // beasts drop hide of their biome tier (Albion skinning)
     if (mob.tpl.beast) {
       const tier = BIOMES[mob.tpl.biome]?.tier || 1;
@@ -620,6 +632,13 @@ export class GameServer {
       killer.char.bossKills[mob.tpl.id] = (killer.char.bossKills[mob.tpl.id] || 0) + 1;
       this.systemMsg(`⚔️ ${mob.tpl.name} has been defeated by ${killer.char.name}'s party!`);
       mob.enraged = false;
+      // rare mount drop (e.g. Frost Whelp from Iceborn)
+      const md = mob.tpl.mountDrop;
+      if (md && Math.random() < md.chance && !killer.char.mounts.includes(md.id)) {
+        killer.char.mounts.push(md.id);
+        this.systemMsg(`🐉 UNBELIEVABLE! ${killer.char.name} obtained the ${md.id.toUpperCase()} mount!`);
+        this.emitInv(killer);
+      }
     }
 
     // world boss: personal loot + valor tokens for every real contributor
@@ -651,6 +670,11 @@ export class GameServer {
     const c = p.char;
     if (c.level >= MAX_LEVEL) return;
     if (p.xpBuffUntil && p.xpBuffUntil > now()) xp = Math.round(xp * (1 + SHRINE.buffPct / 100));
+    const guild = this.guildOf(c);
+    if (guild) {
+      const bonus = Math.min(GUILD.xpBonusCap, (this.guildLevel(guild) - 1) * GUILD.xpBonusPerLevel);
+      if (bonus > 0) xp = Math.round(xp * (1 + bonus / 100));
+    }
     c.xp += xp;
     p.socket.emit('event', { type: 'xp', amount: xp });
     while (c.level < MAX_LEVEL && c.xp >= xpForLevel(c.level)) {
@@ -1195,6 +1219,198 @@ export class GameServer {
     }
   }
 
+  // --- guilds ----------------------------------------------------------------------
+  guildOf(char) { return char.guildId ? this.db.guilds[char.guildId] : null; }
+
+  guildLevel(guild) {
+    let xp = guild.xp, lvl = 1;
+    while (xp >= GUILD.xpPerLevel(lvl)) { xp -= GUILD.xpPerLevel(lvl); lvl++; }
+    return lvl;
+  }
+
+  emitGuild(guild) {
+    if (!guild) return;
+    const members = Object.entries(guild.members).map(([cid, rank]) => {
+      const c = this.db.characters[cid];
+      const online = [...this.players.values()].some(pl => pl.charId === cid);
+      return c ? { name: c.name, rank, level: c.level, online } : null;
+    }).filter(Boolean);
+    const payload = {
+      name: guild.name, level: this.guildLevel(guild), xp: guild.xp,
+      nextXp: GUILD.xpPerLevel(this.guildLevel(guild)),
+      bank: guild.bank, motd: guild.motd, members,
+      log: guild.log.slice(-12),
+    };
+    for (const pl of this.players.values()) {
+      if (pl.char.guildId === guild.id) pl.socket.emit('guildState', payload);
+    }
+  }
+
+  guildLog(guild, text) {
+    guild.log.push(`${new Date().toISOString().slice(5, 16).replace('T', ' ')} ${text}`);
+    if (guild.log.length > 60) guild.log.shift();
+  }
+
+  onGuild(p, data) {
+    const action = data?.action;
+    const c = p.char;
+    const guild = this.guildOf(c);
+    const myRank = guild?.members[p.charId];
+
+    if (action === 'create') {
+      if (guild) return;
+      const name = String(data.name || '').trim();
+      if (!NAME_RE.test(name)) return p.socket.emit('event', { type: 'system', text: 'Guild name must be 3-16 characters.' });
+      if (Object.values(this.db.guilds).some(g => g.name.toLowerCase() === name.toLowerCase())) {
+        return p.socket.emit('event', { type: 'system', text: 'Guild name taken.' });
+      }
+      if (c.gold < GUILD.createCost) return p.socket.emit('event', { type: 'system', text: `Founding a guild costs ${GUILD.createCost}g.` });
+      c.gold -= GUILD.createCost;
+      const id = this.db.newGuildId();
+      this.db.guilds[id] = { id, name, members: { [p.charId]: 'leader' }, motd: 'Welcome!', bank: 0, xp: 0, log: [] };
+      c.guildId = id;
+      this.guildLog(this.db.guilds[id], `${c.name} founded the guild`);
+      this.systemMsg(`🏰 ${c.name} founded the guild <${name}>!`);
+      this.emitSelf(p); this.emitGuild(this.db.guilds[id]);
+      markDirty();
+    } else if (action === 'invite') {
+      if (!guild || myRank === 'member') return;
+      if (Object.keys(guild.members).length >= GUILD.maxMembers) return;
+      const target = [...this.players.values()].find(o => o.char.name.toLowerCase() === String(data.name || '').toLowerCase());
+      if (!target || target.char.guildId) return;
+      target.pendingGuildId = guild.id;
+      target.socket.emit('guildInvite', { from: c.name, guild: guild.name });
+    } else if (action === 'accept') {
+      const g = this.db.guilds[p.pendingGuildId];
+      p.pendingGuildId = null;
+      if (!g || c.guildId || Object.keys(g.members).length >= GUILD.maxMembers) return;
+      g.members[p.charId] = 'member';
+      c.guildId = g.id;
+      this.guildLog(g, `${c.name} joined`);
+      this.emitGuild(g);
+      markDirty();
+    } else if (action === 'leave') {
+      if (!guild) return;
+      delete guild.members[p.charId];
+      c.guildId = null;
+      this.guildLog(guild, `${c.name} left`);
+      if (Object.keys(guild.members).length === 0) delete this.db.guilds[guild.id];
+      else {
+        if (myRank === 'leader') { // pass leadership
+          const next = Object.keys(guild.members)[0];
+          guild.members[next] = 'leader';
+        }
+        this.emitGuild(guild);
+      }
+      p.socket.emit('guildState', null);
+      markDirty();
+    } else if (action === 'kick' || action === 'promote') {
+      if (!guild || myRank !== 'leader') return;
+      const targetChar = Object.values(this.db.characters).find(ch => ch.name.toLowerCase() === String(data.name || '').toLowerCase());
+      if (!targetChar || !guild.members[targetChar.id] || targetChar.id === p.charId) return;
+      if (action === 'kick') {
+        delete guild.members[targetChar.id];
+        targetChar.guildId = null;
+        this.guildLog(guild, `${targetChar.name} was kicked`);
+        const online = [...this.players.values()].find(pl => pl.charId === targetChar.id);
+        online?.socket.emit('guildState', null);
+      } else {
+        guild.members[targetChar.id] = guild.members[targetChar.id] === 'officer' ? 'member' : 'officer';
+        this.guildLog(guild, `${targetChar.name} is now ${guild.members[targetChar.id]}`);
+      }
+      this.emitGuild(guild);
+      markDirty();
+    } else if (action === 'motd') {
+      if (!guild || myRank === 'member') return;
+      guild.motd = String(data.text || '').slice(0, 120);
+      this.emitGuild(guild);
+      markDirty();
+    } else if (action === 'deposit') {
+      if (!guild) return;
+      const amount = Math.max(0, Math.min(c.gold, Math.floor(Number(data.amount) || 0)));
+      if (!amount) return;
+      c.gold -= amount;
+      guild.bank += amount;
+      this.guildLog(guild, `${c.name} deposited ${amount}g`);
+      this.emitSelf(p); this.emitGuild(guild);
+      markDirty();
+    } else if (action === 'withdraw') {
+      if (!guild || myRank === 'member') return;
+      const amount = Math.max(0, Math.min(guild.bank, Math.floor(Number(data.amount) || 0)));
+      if (!amount) return;
+      guild.bank -= amount;
+      c.gold += amount;
+      this.guildLog(guild, `${c.name} withdrew ${amount}g`);
+      this.emitSelf(p); this.emitGuild(guild);
+      markDirty();
+    } else if (action === 'info') {
+      if (guild) this.emitGuild(guild);
+      else p.socket.emit('guildState', null);
+    }
+  }
+
+  // --- town market -----------------------------------------------------------------
+  onMarket(p, data) {
+    const action = data?.action;
+    if (!inTown(p.x, p.z) || p.map !== 'world') {
+      return p.socket.emit('event', { type: 'system', text: 'The market is only available in Havenbrook.' });
+    }
+    if (action === 'list') {
+      const orders = this.db.market.slice(-100).reverse().map(o => ({
+        id: o.id, seller: o.sellerName, price: o.price, item: o.item, mine: o.charId === p.charId,
+      }));
+      p.socket.emit('marketState', { orders });
+    } else if (action === 'sell') {
+      const idx = p.char.inventory.findIndex(i => i.id === String(data.itemId));
+      if (idx === -1) return;
+      const myOrders = this.db.market.filter(o => o.charId === p.charId).length;
+      if (myOrders >= MARKET.maxOrders) return p.socket.emit('event', { type: 'system', text: `Max ${MARKET.maxOrders} listings.` });
+      const item = p.char.inventory[idx];
+      const price = Math.floor(Number(data.price) || 0);
+      if (price < MARKET.minPrice(item) || price > MARKET.maxPrice) {
+        return p.socket.emit('event', { type: 'system', text: `Price must be ${MARKET.minPrice(item)}–${MARKET.maxPrice}g.` });
+      }
+      p.char.inventory.splice(idx, 1);
+      this.db.market.push({ id: this.db.newOrderId(), charId: p.charId, sellerName: p.char.name, item, price, at: Date.now() });
+      this.emitInv(p);
+      this.onMarket(p, { action: 'list' });
+      markDirty();
+    } else if (action === 'buy') {
+      const idx = this.db.market.findIndex(o => o.id === String(data.orderId));
+      if (idx === -1) return;
+      const order = this.db.market[idx];
+      if (order.charId === p.charId) return;
+      if (p.char.gold < order.price) return p.socket.emit('event', { type: 'system', text: 'Not enough gold.' });
+      if (p.char.inventory.length >= INVENTORY_SIZE) return p.socket.emit('event', { type: 'system', text: 'Inventory full.' });
+      p.char.gold -= order.price;
+      p.char.inventory.push(order.item);
+      this.db.market.splice(idx, 1);
+      const net = Math.floor(order.price * (1 - MARKET.taxPct / 100));
+      const seller = this.db.characters[order.charId];
+      if (seller) {
+        seller.gold += net;
+        const online = [...this.players.values()].find(pl => pl.charId === order.charId);
+        if (online) {
+          online.socket.emit('event', { type: 'system', text: `💰 ${order.item.name} sold for ${order.price}g (you got ${net}g after tax).` });
+          this.emitSelf(online);
+        }
+      }
+      p.socket.emit('event', { type: 'system', text: `Bought ${order.item.name} for ${order.price}g.` });
+      this.emitSelf(p); this.emitInv(p);
+      this.onMarket(p, { action: 'list' });
+      markDirty();
+    } else if (action === 'cancel') {
+      const idx = this.db.market.findIndex(o => o.id === String(data.orderId) && o.charId === p.charId);
+      if (idx === -1) return;
+      if (p.char.inventory.length >= INVENTORY_SIZE) return;
+      p.char.inventory.push(this.db.market[idx].item);
+      this.db.market.splice(idx, 1);
+      this.emitInv(p);
+      this.onMarket(p, { action: 'list' });
+      markDirty();
+    }
+  }
+
   // --- direct trade (secure, double-confirm, server-validated) --------------------
   onTradeAction(p, data) {
     const action = data?.action;
@@ -1343,6 +1559,16 @@ export class GameServer {
       this.partyMsg(p.partyId, `${p.char.name}: ${text.slice(3)}`);
       return;
     }
+    if (text.startsWith('/g ')) {
+      const guild = this.guildOf(p.char);
+      if (!guild) return;
+      for (const pl of this.players.values()) {
+        if (pl.char.guildId === guild.id) {
+          pl.socket.emit('chat', { from: `[${guild.name}] ${p.char.name}`, text: text.slice(3), channel: 'party' });
+        }
+      }
+      return;
+    }
 
     const name = (p.clown ? '🤡 ' : '') + p.char.name;
     if (p.clown && Math.random() < 0.7) {
@@ -1474,6 +1700,7 @@ export class GameServer {
         mob.x = mob.spawnX; mob.z = mob.spawnZ;
         mob.state = 'idle'; mob.targetId = null;
         mob.enraged = false; mob.wave = 0; mob.stormDone = false; mob.dots = [];
+        mob.blizzardPending = null; mob.nextBlizzard = 0;
         if (mob.damageBy) mob.damageBy = new Map();
       }
       return;
@@ -1580,6 +1807,16 @@ export class GameServer {
             mob.slamPending = { at, when: t + 1.4 };
             this.event(mob.map, { type: 'bossTelegraph', id: mob.id, at, radius: mob.tpl.slam.radius, sec: 1.4 });
           }
+          // blizzard: several random telegraphed impacts near the party
+          if (mob.isBoss && mob.tpl.blizzard && t >= (mob.nextBlizzard || 0)) {
+            mob.nextBlizzard = t + mob.tpl.blizzard.cooldown;
+            mob.blizzardPending = [];
+            for (let i = 0; i < mob.tpl.blizzard.count; i++) {
+              const at = { x: target.x + ri(-9, 9), z: target.z + ri(-9, 9) };
+              mob.blizzardPending.push({ at, when: t + 1.6 + i * 0.35 });
+              this.event(mob.map, { type: 'bossTelegraph', id: mob.id, at, radius: mob.tpl.blizzard.radius, sec: 1.6 + i * 0.35 });
+            }
+          }
         } else {
           this.mobMoveToward(mob, target, dt);
         }
@@ -1591,6 +1828,25 @@ export class GameServer {
           mob.hp = mob.maxHp;
         });
         break;
+      }
+    }
+
+    // resolve pending blizzard impacts
+    if (mob.blizzardPending?.length) {
+      const due = mob.blizzardPending.filter(b => t >= b.when);
+      mob.blizzardPending = mob.blizzardPending.filter(b => t < b.when);
+      for (const b of due) {
+        let dmg = mob.tpl.damage * mob.tpl.blizzard.multiplier;
+        if (mob.enraged) dmg *= mob.tpl.enrageMult;
+        for (const pl of this.players.values()) {
+          if (pl.dead || pl.map !== mob.map) continue;
+          if (dist(pl, b.at) <= mob.tpl.blizzard.radius) {
+            const reduction = armorReduction(this.effectiveArmor(pl), mob.tpl.level);
+            this.hurtPlayer(pl, Math.max(1, Math.round(dmg * (1 - reduction))), mob.tpl.name);
+            this.applySlow(pl, 40, 3);
+          }
+        }
+        this.effect(mob.map, { kind: 'blast', at: b.at, radius: mob.tpl.blizzard.radius });
       }
     }
 
