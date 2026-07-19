@@ -74,6 +74,13 @@ export class GameClient {
       if (wb.state === 'alive') { this.ui.announce(`🌋 ${wb.name} HAS AWOKEN!`, '#ff5b4d'); sfx.enrage(); }
     });
     net.on('worldBossStatus', list => this.ui.setWorldBossList(list));
+    net.on('fishing', f => {
+      this.fishingState = f.state;
+      if (f.state === 'bite') { this.ui.announce('❗ NOW! Press F!', '#74d0f1'); sfx.crit(); }
+      else if (f.state === 'caught') { this.ui.onGathered({ mat: f.mat, qty: f.qty }); this.ui.announce('🎣 Caught!', '#74d0f1'); this.fishingState = null; }
+      else if (f.state === 'escaped') { this.ui.announce('🐟 It got away…', '#8b93a8'); this.fishingState = null; }
+      else if (f.state === 'cancel') this.fishingState = null;
+    });
     net.on('worldEvent', e => {
       if (e.type === 'mist' && e.state === 'start') {
         this.ui.announce('🌫 GREEN MIST over Duskwood!', '#7cffb2');
@@ -203,7 +210,9 @@ export class GameClient {
       this.net.emit('gather', { tx: n.tx, tz: n.tz });
       this.spawnGatherFx(node);
       (n.kind === 'wood' || n.kind === 'fiber') ? sfx.chop() : sfx.mine();
+      return;
     }
+    this.net.emit('fish'); // near water the server accepts a cast/hook
   }
 
   // --- server state ------------------------------------------------------------

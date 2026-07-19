@@ -2,7 +2,7 @@
 import {
   CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS,
   RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS, profLevel, DAILY_QUESTS,
-  TALENTS, SEASON,
+  TALENTS, SEASON, MEALS,
 } from '/shared/constants.js';
 import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
@@ -29,6 +29,7 @@ export class UI {
     net.on('tradeState', t => this.onTradeState(t));
     net.on('tradeDone', t => this.onTradeDone(t));
     net.on('guildState', g => { this.guild = g; this.renderGuild(); });
+    net.on('friendsState', f => { this.friends = f.friends; this.renderFriends(); });
     net.on('guildInvite', g => this.onGuildInvite(g));
     net.on('marketState', m => { this.market = m; this.renderMarket(); });
 
@@ -84,6 +85,8 @@ export class UI {
         if (text.startsWith('/invite ')) this.net.emit('party', { action: 'invite', name: text.slice(8).trim() });
         else if (text.startsWith('/trade ')) this.net.emit('trade', { action: 'invite', name: text.slice(7).trim() });
         else if (text === '/arena') this.net.emit('arena', { action: this.inQueue ? 'leave' : 'queue' }), this.inQueue = !this.inQueue;
+        else if (text.startsWith('/friend ')) this.net.emit('friend', { action: 'add', name: text.slice(8).trim() });
+        else if (text.startsWith('/unfriend ')) this.net.emit('friend', { action: 'remove', name: text.slice(10).trim() });
         else if (text === '/leave') this.net.emit('party', { action: 'leave' });
         else this.net.emit('chat', { text });
       }
@@ -325,6 +328,15 @@ export class UI {
     strip.innerHTML = mats.length
       ? mats.map(([k, q]) => this.matChip(k, q)).join('')
       : '<span class="tt-muted" style="font-size:12px">Gather resources with [F] near trees, rocks, ore veins and plants…</span>';
+    const meals = Object.entries(inv.meals || {}).filter(([, q]) => q > 0);
+    if (meals.length) {
+      strip.innerHTML += '<div style="margin-top:6px">' + meals.map(([id, q]) => {
+        const m = MEALS[id];
+        return `<span class="mat-chip" data-meal="${id}" title="${m?.desc || ''}" style="cursor:pointer">${m?.icon || '🍽'} ${m?.name || id} ×${q}</span>`;
+      }).join('') + ' <span class="tt-muted" style="font-size:11px">click to eat</span></div>';
+      strip.querySelectorAll('[data-meal]').forEach(el =>
+        el.addEventListener('click', () => this.net.emit('eatMeal', { mealId: el.dataset.meal })));
+    }
     if (inv.mounts?.length) {
       strip.innerHTML += '<div style="margin-top:6px">' + inv.mounts.map(m =>
         `<span class="mat-chip ${inv.activeMount === m ? 'mat-active' : ''}" data-mount="${m}">🐴 ${MOUNTS[m]?.name || m}</span>`).join('') +
@@ -668,10 +680,25 @@ export class UI {
     setTimeout(() => toast.classList.add('hidden'), 30000);
   }
 
+  renderFriends() {
+    const el = document.getElementById('friends-strip');
+    if (!el) return;
+    const f = this.friends || [];
+    el.innerHTML = `<div class="q-name" style="margin-top:8px">👥 Friends (${f.length})</div>` +
+      (f.length
+        ? f.map(fr => `<div class="stat-row" style="font-size:13px"><span>${fr.online ? '🟢' : '⚫'} ${fr.name}</span>
+            <button class="btn-small fr-rm" data-name="${fr.name}">✕</button></div>`).join('')
+        : '<div class="tt-muted" style="font-size:12px">Add with /friend name</div>');
+    el.querySelectorAll('.fr-rm').forEach(b =>
+      b.addEventListener('click', () => this.net.emit('friend', { action: 'remove', name: b.dataset.name })));
+  }
+
   renderGuild() {
     const body = $('guild-body');
     if (!body) return;
     const g = this.guild;
+    // friends strip lives at the bottom of the guild panel either way
+    setTimeout(() => { this.net.emit('friend', {}); }, 50);
     if (!g) {
       body.innerHTML = `
         <div style="padding:14px">
@@ -683,6 +710,8 @@ export class UI {
         </div>`;
       $('guild-create').addEventListener('click', () =>
         this.net.emit('guild', { action: 'create', name: $('guild-name-input').value }));
+      body.insertAdjacentHTML('beforeend', '<div id="friends-strip" style="padding:0 14px 14px"></div>');
+      this.renderFriends();
       return;
     }
     body.innerHTML = `
@@ -717,6 +746,8 @@ export class UI {
     $('g-promote').addEventListener('click', () => this.net.emit('guild', { action: 'promote', name: val() }));
     $('g-kick').addEventListener('click', () => this.net.emit('guild', { action: 'kick', name: val() }));
     $('g-leave').addEventListener('click', () => { if (confirm('Leave guild?')) this.net.emit('guild', { action: 'leave' }); });
+    body.insertAdjacentHTML('beforeend', '<div id="friends-strip" style="padding:0 14px 14px"></div>');
+    this.renderFriends();
   }
 
   // --- market ------------------------------------------------------------------
@@ -848,6 +879,8 @@ export class UI {
       show(`${MAT_ICONS[kind] || ''} T${n.tier} ${MAT_NAMES[kind]} — press <b>[F]</b> to gather`);
       return;
     }
+    if (game.fishingState === 'cast') { show('🎣 Waiting for a bite…'); return; }
+    if (game.fishingState === 'bite') { show('❗ <b>[F]</b> NOW!'); return; }
     el.classList.add('hidden');
   }
 

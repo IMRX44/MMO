@@ -9,7 +9,7 @@ import {
   GATHER, RECIPES, MOUNTS, CHESTS,
   STAMINA, ENCHANT, PITY_SHARDS, itemTier, profLevel, PROF_GATES,
   WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE, GUILD, MARKET, NAME_RE,
-  TALENTS, TALENT_POINTS, TALENT_RESPEC_COST, ARENA, SEASON,
+  TALENTS, TALENT_POINTS, TALENT_RESPEC_COST, ARENA, SEASON, FISHING, MEALS,
 } from '../shared/constants.js';
 import { track } from './telemetry.js';
 import {
@@ -740,6 +740,7 @@ export class GameServer {
     }
     const teXp = this.te(p).xpPct;
     if (teXp) xp = Math.round(xp * (1 + teXp / 100));
+    if (p.food && p.food.until > now() && p.food.buff.xpPct) xp = Math.round(xp * (1 + p.food.buff.xpPct / 100));
     c.xp += xp;
     p.socket.emit('event', { type: 'xp', amount: xp });
     while (c.level < MAX_LEVEL && c.xp >= xpForLevel(c.level)) {
@@ -1015,6 +1016,9 @@ export class GameServer {
       mats[out.material] = (mats[out.material] || 0) + out.qty;
     } else if (out.potion) {
       p.char.potions[out.potion] = (p.char.potions[out.potion] || 0) + out.qty;
+    } else if (out.meal) {
+      p.char.meals ??= {};
+      p.char.meals[out.meal] = (p.char.meals[out.meal] || 0) + out.qty;
     } else if (out.mount) {
       if (!p.char.mounts.includes(out.mount)) p.char.mounts.push(out.mount);
     } else if (out.gear) {
@@ -1287,6 +1291,86 @@ export class GameServer {
     for (const sid of party.members) {
       this.players.get(sid)?.socket.emit('chat', { from: 'Party', text, channel: 'party' });
     }
+  }
+
+  // --- fishing ----------------------------------------------------------------------
+  nearWater(p) {
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+      const wx = p.x + Math.cos(a) * FISHING.waterRange;
+      const wz = p.z + Math.sin(a) * FISHING.waterRange;
+      if (groundHeight(wx, wz) <= WATER_LEVEL - 0.3) return true;
+    }
+    return false;
+  }
+
+  onFish(p) {
+    if (p.dead || p.map !== 'world') return;
+    const t = now();
+    const f = p.fishing;
+    if (f?.bitten) { // hook attempt inside the window?
+      p.fishing = null;
+      if (t <= f.hookedUntil) {
+        const tier = biomeAt(p.x / TILE, p.z / TILE).tier;
+        const key = `fish${tier}`;
+        const qty = Math.random() < 0.25 ? 2 : 1;
+        p.char.materials[key] = (p.char.materials[key] || 0) + qty;
+        p.char.professions.fish = (p.char.professions.fish || 0) + 8 * tier;
+        this.bumpDaily(p, 'gathers');
+        this.grantSeasonXp(p, 2);
+        this.grantXp(p, 6 * tier);
+        p.socket.emit('fishing', { state: 'caught', mat: key, qty });
+        this.emitInv(p);
+        markDirty();
+      } else {
+        p.socket.emit('fishing', { state: 'escaped' });
+      }
+      return;
+    }
+    if (f) { // reeling in early cancels
+      p.fishing = null;
+      p.socket.emit('fishing', { state: 'cancel' });
+      return;
+    }
+    if (!this.nearWater(p)) return;
+    if (t < (p.fishCd || 0)) return;
+    p.fishCd = t + FISHING.cdSec;
+    p.fishing = { biteAt: t + FISHING.biteMin + Math.random() * (FISHING.biteMax - FISHING.biteMin), bitten: false };
+    p.socket.emit('fishing', { state: 'cast' });
+  }
+
+  // --- meals -------------------------------------------------------------------------
+  onEatMeal(p, mealId) {
+    const meal = MEALS[mealId];
+    if (!meal || (p.char.meals?.[mealId] || 0) <= 0) return;
+    p.char.meals[mealId]--;
+    p.food = { buff: meal.buff, until: now() + meal.durSec };
+    p.socket.emit('event', { type: 'system', text: `${meal.icon} ${meal.name}: ${meal.desc}` });
+    this.emitInv(p);
+    markDirty();
+  }
+
+  // --- friends -----------------------------------------------------------------------
+  onFriend(p, data) {
+    const c = p.char;
+    c.friends ??= [];
+    const action = data?.action;
+    if (action === 'add') {
+      const name = String(data.name || '').trim();
+      const exists = Object.values(this.db.characters).some(ch => ch.name.toLowerCase() === name.toLowerCase());
+      if (!exists || name.toLowerCase() === c.name.toLowerCase()) return;
+      if (!c.friends.some(f => f.toLowerCase() === name.toLowerCase()) && c.friends.length < 30) {
+        c.friends.push(name);
+        markDirty();
+      }
+    } else if (action === 'remove') {
+      c.friends = c.friends.filter(f => f.toLowerCase() !== String(data.name || '').toLowerCase());
+      markDirty();
+    }
+    const list = c.friends.map(name => ({
+      name,
+      online: [...this.players.values()].some(pl => pl.char.name.toLowerCase() === name.toLowerCase()),
+    }));
+    p.socket.emit('friendsState', { friends: list });
   }
 
   // --- season pass (free) -----------------------------------------------------------
@@ -1892,9 +1976,24 @@ export class GameServer {
       if (p.map !== 'world' || walkable(nx, nz)) { p.x = nx; p.z = nz; }
     }
 
+    // fishing bite timing (server decides when the fish bites)
+    if (p.fishing && !p.fishing.bitten && t >= p.fishing.biteAt) {
+      p.fishing.bitten = true;
+      p.fishing.hookedUntil = t + FISHING.windowSec;
+      p.socket.emit('fishing', { state: 'bite', windowSec: FISHING.windowSec });
+    }
+    if (p.fishing?.bitten && t > p.fishing.hookedUntil + 0.3) {
+      p.fishing = null;
+      p.socket.emit('fishing', { state: 'escaped' });
+    }
+    if (p.fishing && (p.input.x || p.input.z)) { p.fishing = null; p.socket.emit('fishing', { state: 'cancel' }); }
+
+    // food buffs
+    const food = p.food && p.food.until > t ? p.food.buff : null;
+
     // regen
-    p.hp = Math.min(p.derived.maxHp, p.hp + p.derived.hpRegen * dt);
-    p.mp = Math.min(p.derived.maxMp, p.mp + p.derived.mpRegen * dt);
+    p.hp = Math.min(p.derived.maxHp, p.hp + (p.derived.hpRegen + (food?.hpRegen || 0)) * dt);
+    p.mp = Math.min(p.derived.maxMp, p.mp + (p.derived.mpRegen + (food?.mpRegen || 0)) * dt);
 
     // stamina: drain while sprint-moving, regen otherwise
     const sprintMoving = p.sprinting && (p.input.x || p.input.z) && !this.inCombat(p, t) && !p.mounted;
@@ -2200,6 +2299,8 @@ export class GameServer {
       talents: p.char.talents,
       talentPoints: TALENT_POINTS(p.char.level) - this.talentsSpent(p.char),
       arena: { rating: p.char.arenaRating, wins: p.char.arenaWins, losses: p.char.arenaLosses },
+      meals: p.char.meals || {},
+      friends: p.char.friends || [],
       season: p.char.season ? {
         xp: p.char.season.xp,
         level: this.seasonLevel(p.char.season),

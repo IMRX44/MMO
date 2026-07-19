@@ -242,10 +242,23 @@ export const REFINED_OF = { wood: 'plank', stone: 'block', ore: 'bar', fiber: 'c
 export const MAT_NAMES = {
   wood: 'Wood', stone: 'Stone', ore: 'Ore', fiber: 'Fiber', hide: 'Hide',
   plank: 'Planks', block: 'Stone Blocks', bar: 'Metal Bars', cloth: 'Cloth', leather: 'Leather',
+  fish: 'Fish',
 };
 export const MAT_ICONS = {
   wood: '🪵', stone: '🪨', ore: '⛏️', fiber: '🌾', hide: '🐾',
   plank: '📦', block: '🧱', bar: '🔩', cloth: '🧵', leather: '🟤',
+  fish: '🐟',
+};
+
+// Fishing: cast near water, wait for the bite, hook inside the window.
+// All timing lives on the server — the client only sends F presses.
+export const FISHING = { waterRange: 6, biteMin: 2, biteMax: 6, windowSec: 1.4, cdSec: 1.5 };
+
+// Cooking: meals give long buffs — the pre-boss ritual (MASTER_PLAN §5.4).
+export const MEALS = {
+  grilledFish: { name: 'Grilled Fish', icon: '🍖', durSec: 1800, buff: { xpPct: 15 }, desc: '+15% XP for 30 min' },
+  heartyStew:  { name: 'Hearty Stew',  icon: '🍲', durSec: 1800, buff: { hpRegen: 3 }, desc: '+3 HP/s for 30 min' },
+  manaSoup:    { name: 'Mana Soup',    icon: '🥣', durSec: 1800, buff: { mpRegen: 3 }, desc: '+3 MP/s for 30 min' },
 };
 export const MAX_TIER = 5;
 export const GATHER = { range: 7, cooldown: 1.4, yieldMin: 2, yieldMax: 4, usesPerNode: 3, respawnSec: 75, xpPerTier: 8 };
@@ -436,6 +449,9 @@ export const RECIPES = [
   { id: 'brew_mp', group: 'consumable', tier: 1, name: 'Mana Potions ×3', icon: '💙', cost: { fiber1: 3 }, out: { potion: 'mpPotion', qty: 3 } },
   { id: 'brew_hp3', group: 'consumable', tier: 3, name: 'Health Potions ×10', icon: '❤️', cost: { fiber3: 4 }, out: { potion: 'hpPotion', qty: 10 } },
   { id: 'brew_mp3', group: 'consumable', tier: 3, name: 'Mana Potions ×10', icon: '💙', cost: { fiber3: 4 }, out: { potion: 'mpPotion', qty: 10 } },
+  { id: 'cook_grill', group: 'food', tier: 1, name: 'Grilled Fish ×2', icon: '🍖', cost: { fish1: 2, wood1: 1 }, out: { meal: 'grilledFish', qty: 2 } },
+  { id: 'cook_stew',  group: 'food', tier: 2, name: 'Hearty Stew ×2',  icon: '🍲', cost: { fish2: 2, hide1: 1 }, out: { meal: 'heartyStew', qty: 2 } },
+  { id: 'cook_soup',  group: 'food', tier: 2, name: 'Mana Soup ×2',    icon: '🥣', cost: { fish2: 2, fiber2: 2 }, out: { meal: 'manaSoup', qty: 2 } },
   { id: 'mount_horse', group: 'mount', tier: 1, name: 'Riding Horse', icon: '🐴', cost: { leather1: 4, plank1: 4, gold: 200 }, out: { mount: 'horse' } },
   { id: 'mount_direwolf', group: 'mount', tier: 3, name: 'Direwolf', icon: '🐺', cost: { leather3: 6, bar3: 4, gold: 1500 }, out: { mount: 'direwolf' } },
   { id: 'mount_magma', group: 'mount', tier: 5, name: 'Magma Steed', icon: '🔥', cost: { bar5: 8, block5: 6, gold: 6000 }, out: { mount: 'magmasteed' } },

@@ -84,6 +84,11 @@ export function heightAt(tx, tz) {
   if (b.id === BIOMES.SNOW.id) h += 5;
   if (b.id === BIOMES.VOLCANIC.id) h += 7 + ridge * 3;
   if (b.id === BIOMES.DESERT.id) h = h * 0.5 + 2;
+  // carve lakes (fishing spots) — skip volcanic
+  if (b.id !== BIOMES.VOLCANIC.id) {
+    const lake = fbm(tx * 0.02 + 50, tz * 0.02 - 70, WORLD_SEED + 21, 3);
+    if (lake < 0.38) h -= (0.38 - lake) * 45;
+  }
   h = Math.max(h, 0);
   const tb = townBlend(tx, tz);
   return h * (1 - tb) + TOWN_HEIGHT * tb;
