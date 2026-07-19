@@ -2,6 +2,7 @@
 import {
   CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS,
   RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS, profLevel, DAILY_QUESTS,
+  TALENTS,
 } from '/shared/constants.js';
 import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
@@ -47,6 +48,7 @@ export class UI {
       if (e.code === 'KeyV') this.togglePanel('panel-craft');
       if (e.code === 'KeyG') this.togglePanel('panel-guild');
       if (e.code === 'KeyP') this.togglePanel('panel-market');
+      if (e.code === 'KeyT') this.togglePanel('panel-talents');
     });
 
     // settings sliders
@@ -81,6 +83,7 @@ export class UI {
         if (!text) return;
         if (text.startsWith('/invite ')) this.net.emit('party', { action: 'invite', name: text.slice(8).trim() });
         else if (text.startsWith('/trade ')) this.net.emit('trade', { action: 'invite', name: text.slice(7).trim() });
+        else if (text === '/arena') this.net.emit('arena', { action: this.inQueue ? 'leave' : 'queue' }), this.inQueue = !this.inQueue;
         else if (text === '/leave') this.net.emit('party', { action: 'leave' });
         else this.net.emit('chat', { text });
       }
@@ -122,6 +125,7 @@ export class UI {
       if (id === 'panel-quests') this.renderQuests();
       if (id === 'panel-craft') this.renderCraft();
       if (id === 'panel-guild') { this.net.emit('guild', { action: 'info' }); this.renderGuild(); }
+      if (id === 'panel-talents') this.renderTalents();
       if (id === 'panel-market') { this.marketSellMode = false; this.net.emit('market', { action: 'list' }); }
     }
   }
@@ -220,6 +224,7 @@ export class UI {
     if (!$('panel-skills').classList.contains('hidden')) this.renderSkills();
     if (!$('panel-quests').classList.contains('hidden')) this.renderQuests();
     if (!$('panel-craft').classList.contains('hidden')) this.renderCraft();
+    if (!$('panel-talents').classList.contains('hidden')) this.renderTalents();
   }
 
   onGathered(e) {
@@ -595,6 +600,41 @@ export class UI {
     $('panel-trade').classList.add('hidden');
     if (!t.ok && t.reason) this.chatLine({ from: 'System', text: t.reason, channel: 'system' });
     if (t.ok) sfx.coin();
+  }
+
+  // --- talents -----------------------------------------------------------------
+  renderTalents() {
+    const body = $('talent-body');
+    if (!body || !this.charInfo) return;
+    const tree = TALENTS[this.charInfo.class] || [];
+    const mine = this.inv?.talents || {};
+    const points = this.inv?.talentPoints ?? 0;
+    const arena = this.inv?.arena;
+    body.innerHTML = `
+      <div style="padding:8px 14px 0;display:flex;justify-content:space-between;align-items:center">
+        <span class="unspent">✦ ${points} points</span>
+        <button class="btn-small" id="t-respec">Respec (${100 * (this.self?.level || 1)}g)</button>
+      </div>
+      <div class="talent-cols">
+        ${tree.map(br => `
+          <div class="talent-col">
+            <h4>${br.icon} ${br.name}</h4>
+            ${br.nodes.map((n, i) => {
+              const rank = mine[n.id] || 0;
+              const prevOk = i === 0 || (mine[br.nodes[i - 1].id] || 0) > 0;
+              const locked = !prevOk || (rank === 0 && points === 0);
+              return `<div class="tnode ${n.keystone ? 'keystone' : ''} ${rank >= n.max ? 'maxed' : ''} ${locked && rank === 0 ? 'locked' : ''}"
+                data-id="${n.id}" title="${n.desc}">
+                <span>${n.name}</span><span class="tn-rank">${rank}/${n.max}</span>
+              </div>`;
+            }).join('')}
+          </div>`).join('')}
+      </div>
+      ${arena ? `<div class="tt-muted" style="padding:0 14px 12px;font-size:12px">
+        ⚔️ Arena: ${arena.rating} rating · ${arena.wins}W/${arena.losses}L · type <b>/arena</b> in chat to queue</div>` : ''}`;
+    body.querySelectorAll('.tnode').forEach(el =>
+      el.addEventListener('click', () => this.net.emit('talent', { nodeId: el.dataset.id })));
+    $('t-respec').addEventListener('click', () => this.net.emit('respecTalents'));
   }
 
   // --- guild -------------------------------------------------------------------

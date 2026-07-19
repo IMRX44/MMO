@@ -9,6 +9,7 @@ import {
   GATHER, RECIPES, MOUNTS, CHESTS,
   STAMINA, ENCHANT, PITY_SHARDS, itemTier, profLevel, PROF_GATES,
   WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE, GUILD, MARKET, NAME_RE,
+  TALENTS, TALENT_POINTS, TALENT_RESPEC_COST, ARENA,
 } from '../shared/constants.js';
 import {
   biomeAt, groundHeight, clampToWorld, HALF_WORLD, TILE, WATER_LEVEL, BIOMES,
@@ -54,6 +55,12 @@ export class GameServer {
     this.spawnWorldMobs();
     for (const dk of Object.keys(DUNGEONS)) this.spawnDungeonMobs(dk);
     this.scheduleWorldBosses();
+    this.arenaQueue = [];
+    this.arenas = new Map();
+    this.nextArenaId = 1;
+    this.worldEvent = null;
+    setInterval(() => this.tickArenaQueue(), 3000);
+    setInterval(() => this.tickWorldEvents(), 30_000);
 
     setInterval(() => this.tick(1 / TICK_HZ), 1000 / TICK_HZ);
     setInterval(() => this.broadcast(), 1000 / NET_HZ);
@@ -185,6 +192,10 @@ export class GameServer {
     char.mounts ??= [];
     char.activeMount ??= null;
     char.professions ??= {};   // kind -> xp
+    char.talents ??= {};
+    char.arenaRating ??= ARENA.startRating;
+    char.arenaWins ??= 0;
+    char.arenaLosses ??= 0;
     char.shards ??= 0;
     char.tokens ??= 0;
     char.loginStreak ??= 0;
@@ -283,7 +294,7 @@ export class GameServer {
     if (p.char.level < skill.unlock) return;
     const sLevel = p.char.skillLevels[skill.id] || 1;
     const cdKey = skill.id;
-    const haste = 1 - p.derived.hastePct / 100;
+    const haste = (1 - p.derived.hastePct / 100) * (1 - (this.te(p).cdrPct || 0) / 100);
     if ((p.cooldowns[cdKey] || 0) > t) return;
     if (p.mp < skill.mp) return;
 
@@ -313,16 +324,27 @@ export class GameServer {
 
   canDamagePlayer(attacker, victim) {
     if (attacker === victim) return false;
+    if (attacker.map.startsWith('arena') && attacker.map === victim.map) return true;
     if (attacker.map !== 'world' || victim.map !== 'world') return false;
     const ab = biomeAt(attacker.x / TILE, attacker.z / TILE);
     const vb = biomeAt(victim.x / TILE, victim.z / TILE);
     return ab.id === BIOMES[PVP_BIOME].id && vb.id === BIOMES[PVP_BIOME].id;
   }
 
-  executeSkill(p, skill, sLevel, target, point) {
+  executeSkill(p, rawSkill, sLevel, target, point) {
     const t = now();
+    const te = this.te(p);
+    // talent-adjusted copy of the skill (range/radius/stun/slow scaling)
+    const skill = { ...rawSkill };
+    if (skill.range > 0 && te.rangePct) skill.range *= 1 + te.rangePct / 100;
+    if (skill.radius && te.aoeRadiusPct) skill.radius *= 1 + te.aoeRadiusPct / 100;
+    if (skill.stunSec && te.stunDurPct) skill.stunSec *= 1 + te.stunDurPct / 100;
+    if (skill.slowPct && te.slowPowerPct) skill.slowPct = Math.min(80, skill.slowPct * (1 + te.slowPowerPct / 100));
     const power = skillPower(p.char, p.derived, skill, sLevel);
     const pos = { x: p.x, z: p.z };
+    if (te.slowBolt && skill.id === 'bolt' && target?.kind === 'mob') {
+      this.applySlow(target.e, 20, 2);
+    }
 
     switch (skill.kind) {
       case 'melee':
@@ -361,9 +383,10 @@ export class GameServer {
         if (!target) target = this.nearestMobInRange(p, skill.range);
         if (!target || dist(pos, target.e) > skill.range + 1.5) return false;
         let current = target, mult = 1;
+        const jumps = skill.jumps + (te.chainJumps || 0);
         const hit = new Set();
         const chain = [{ x: p.x, z: p.z }];
-        for (let j = 0; j < skill.jumps && current; j++) {
+        for (let j = 0; j < jumps && current; j++) {
           this.dealDamage(p, current, power * mult, skill);
           hit.add(current.e.id || current.e.socketId);
           chain.push({ x: current.e.x, z: current.e.z });
@@ -406,7 +429,7 @@ export class GameServer {
       case 'heal': {
         const ally = (target && target.kind === 'player' && !this.canDamagePlayer(p, target.e))
           ? target.e : this.lowestHpAlly(p, skill.range);
-        this.healEntity(p, ally, power + p.derived.healPower);
+        this.healEntity(p, ally, (power + p.derived.healPower) * (1 + (te.healPct || 0) / 100));
         this.effect(p.map, { kind: 'heal', at: { x: ally.x, z: ally.z }, skill: skill.id });
         return true;
       }
@@ -420,7 +443,7 @@ export class GameServer {
       case 'shield': {
         const ally = (target && target.kind === 'player' && !this.canDamagePlayer(p, target.e))
           ? target.e : this.lowestHpAlly(p, skill.range);
-        ally.shield = power;
+        ally.shield = power * (1 + (te.shieldPct || 0) / 100);
         ally.shieldUntil = t + skill.buffSec;
         this.effect(p.map, { kind: 'shield', at: { x: ally.x, z: ally.z }, skill: skill.id });
         return true;
@@ -488,15 +511,25 @@ export class GameServer {
   }
 
   dealDamage(p, target, rawDamage, skill = {}) {
+    const te = this.te(p);
     const crit = Math.random() * 100 < p.derived.critPct;
     let dmg = rawDamage * (crit ? 1.8 : 1) * (0.92 + Math.random() * 0.16);
+    if (te.lastStand && p.hp / p.derived.maxHp < 0.3) dmg *= 1.4;
     if (target.kind === 'mob') {
       const mob = target.e;
+      if (te.execute && mob.hp / mob.maxHp < 0.3) dmg *= 1 + te.execute / 100;
       dmg = Math.max(1, Math.round(dmg));
       mob.hp -= dmg;
       if (mob.damageBy) mob.damageBy.set(p.socketId, (mob.damageBy.get(p.socketId) || 0) + dmg);
+      if (p.derived.lifestealPct > 0) {
+        p.hp = Math.min(p.derived.maxHp, p.hp + dmg * p.derived.lifestealPct / 100);
+      }
+      const dotBoost = 1 + (te.dotDamagePct || 0) / 100;
       if (skill.dotMult) {
-        mob.dots.push({ dmg: rawDamage * skill.dotMult / (skill.dotSec || 4), ticksLeft: skill.dotSec || 4, interval: 1, elapsed: 0, srcId: p.socketId });
+        mob.dots.push({ dmg: rawDamage * skill.dotMult * dotBoost / (skill.dotSec || 4), ticksLeft: skill.dotSec || 4, interval: 1, elapsed: 0, srcId: p.socketId });
+      }
+      if (te.burnCrit && crit && !skill.dotMult) {
+        mob.dots.push({ dmg: rawDamage * 0.3 / 3, ticksLeft: 3, interval: 1, elapsed: 0, srcId: p.socketId });
       }
       if (mob.state === 'idle' || mob.state === 'return') { mob.state = 'chase'; mob.targetId = p.socketId; }
       this.event(p.map, { type: 'damage', targetId: mob.id, amount: dmg, crit });
@@ -511,8 +544,12 @@ export class GameServer {
 
   effectiveArmor(p) {
     let armor = p.derived.armor;
+    const te = this.te(p);
     const b = p.buffs.armor;
     if (b && b.until > now()) armor *= 1 + b.pct / 100;
+    const missing = 1 - p.hp / p.derived.maxHp;
+    if (te.fortress) armor *= 1 + 0.04 * Math.floor(missing * 10);
+    if (te.lastStand && missing > 0.7) armor *= 0.8;
     return armor;
   }
 
@@ -534,6 +571,11 @@ export class GameServer {
     this.event(victim.map, { type: 'damage', targetId: victim.socketId, amount: dmg, crit });
     if (victim.hp <= 0) {
       victim.hp = 0;
+      if (victim.map.startsWith('arena')) {
+        this.event(victim.map, { type: 'playerDeath', id: victim.socketId });
+        this.endArena(victim);
+        return;
+      }
       victim.dead = true;
       victim.respawnAt = now() + RESPAWN_SECONDS.player;
       victim.input = { x: 0, z: 0 };
@@ -567,9 +609,16 @@ export class GameServer {
     mob.respawnAt = now() + (mob.isBoss ? RESPAWN_SECONDS.boss : RESPAWN_SECONDS.mob);
     this.event(mob.map, { type: 'mobDeath', id: mob.id });
 
+    // event rewards
+    if (mob.eventMob) {
+      killer.char.tokens = (killer.char.tokens || 0) + 2;
+      killer.socket.emit('event', { type: 'system', text: '🛡 +2 Valor Tokens for defending Havenbrook!' });
+    }
+    const mistBoost = this.worldEvent?.type === 'mist' && mob.tpl.biome === 'FOREST' ? 1.5 : 1;
+
     // XP + gold, shared with nearby party members
     const members = this.partyMembersNear(killer, PARTY_XP_RANGE);
-    const bonus = members.length > 1 ? 1 + PARTY_XP_BONUS : 1;
+    const bonus = (members.length > 1 ? 1 + PARTY_XP_BONUS : 1) * mistBoost;
     const xpEach = Math.max(1, Math.round(mob.tpl.xp * bonus / members.length));
     const gold = ri(mob.tpl.gold[0], mob.tpl.gold[1]);
     const goldEach = Math.max(1, Math.round(gold / members.length));
@@ -617,7 +666,7 @@ export class GameServer {
 
     // loot roll — only the killer receives the item (personal loot)
     const isBoss = !!mob.isBoss;
-    const chance = isBoss ? 1 : DROP_CHANCE;
+    const chance = isBoss ? 1 : DROP_CHANCE * (this.worldEvent?.type === 'mist' && mob.tpl.biome === 'FOREST' ? 1.5 : 1);
     if (Math.random() < chance && killer.char.inventory.length < INVENTORY_SIZE) {
       const item = rollItem(mob.tpl.level, isBoss ? mob.tpl.lootBonus : {});
       killer.char.inventory.push(item);
@@ -675,6 +724,8 @@ export class GameServer {
       const bonus = Math.min(GUILD.xpBonusCap, (this.guildLevel(guild) - 1) * GUILD.xpBonusPerLevel);
       if (bonus > 0) xp = Math.round(xp * (1 + bonus / 100));
     }
+    const teXp = this.te(p).xpPct;
+    if (teXp) xp = Math.round(xp * (1 + teXp / 100));
     c.xp += xp;
     p.socket.emit('event', { type: 'xp', amount: xp });
     while (c.level < MAX_LEVEL && c.xp >= xpForLevel(c.level)) {
@@ -1216,6 +1267,154 @@ export class GameServer {
     if (!party) return;
     for (const sid of party.members) {
       this.players.get(sid)?.socket.emit('chat', { from: 'Party', text, channel: 'party' });
+    }
+  }
+
+  // --- talents ---------------------------------------------------------------------
+  talentsSpent(char) {
+    return Object.values(char.talents || {}).reduce((a, b) => a + b, 0);
+  }
+
+  onTalent(p, nodeId) {
+    const tree = TALENTS[p.char.class] || [];
+    let node = null, branch = null, idx = -1;
+    for (const br of tree) {
+      const i = br.nodes.findIndex(n => n.id === nodeId);
+      if (i >= 0) { node = br.nodes[i]; branch = br; idx = i; break; }
+    }
+    if (!node) { this.naughty(p, 1); return; }
+    const cur = p.char.talents[nodeId] || 0;
+    if (cur >= node.max) return;
+    if (this.talentsSpent(p.char) >= TALENT_POINTS(p.char.level)) return;
+    if (idx > 0 && !(p.char.talents[branch.nodes[idx - 1].id] > 0)) return; // sequential unlock
+    p.char.talents[nodeId] = cur + 1;
+    p.derived = derivedStats(p.char);
+    p.hp = Math.min(p.hp, p.derived.maxHp);
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  onRespecTalents(p) {
+    const cost = TALENT_RESPEC_COST(p.char.level);
+    if (p.char.gold < cost || !this.talentsSpent(p.char)) return;
+    p.char.gold -= cost;
+    p.char.talents = {};
+    p.derived = derivedStats(p.char);
+    p.hp = Math.min(p.hp, p.derived.maxHp);
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  te(p) { return p.derived.talents || {}; }
+
+  // --- arena (1v1, Elo) -------------------------------------------------------------
+  onArena(p, action) {
+    if (action === 'queue') {
+      if (p.map !== 'world' || p.dead || this.arenaQueue.includes(p.socketId)) return;
+      this.arenaQueue.push(p.socketId);
+      p.socket.emit('event', { type: 'system', text: `⚔️ Queued for arena (rating ${p.char.arenaRating}). /arena again to leave.` });
+    } else if (action === 'leave') {
+      this.arenaQueue = this.arenaQueue.filter(id => id !== p.socketId);
+      p.socket.emit('event', { type: 'system', text: 'Left the arena queue.' });
+    }
+  }
+
+  tickArenaQueue() {
+    this.arenaQueue = this.arenaQueue.filter(id => {
+      const pl = this.players.get(id);
+      return pl && !pl.dead && pl.map === 'world';
+    });
+    while (this.arenaQueue.length >= 2) {
+      const a = this.players.get(this.arenaQueue.shift());
+      const b = this.players.get(this.arenaQueue.shift());
+      if (a && b) this.startArena(a, b);
+    }
+  }
+
+  startArena(a, b) {
+    const id = 'arena' + this.nextArenaId++;
+    this.arenas.set(id, { ids: [a.socketId, b.socketId], over: false });
+    const t = now();
+    for (const [pl, x] of [[a, -7], [b, 7]]) {
+      pl.returnPos = { x: pl.x, z: pl.z };
+      pl.map = id;
+      pl.x = x; pl.z = 0;
+      pl.hp = pl.derived.maxHp; pl.mp = pl.derived.maxMp;
+      pl.stunUntil = t + ARENA.countdownSec;
+      pl.cooldowns = {};
+      if (pl.mounted) this.setMount(pl, null);
+      pl.socket.emit('map', { map: id, x: pl.x, z: pl.z });
+      pl.socket.emit('event', { type: 'system', text: `⚔️ ARENA: ${a.char.name} (${a.char.arenaRating}) vs ${b.char.name} (${b.char.arenaRating}) — fight in ${ARENA.countdownSec}s!` });
+    }
+    this.systemMsg(`⚔️ Arena duel: ${a.char.name} vs ${b.char.name}!`);
+  }
+
+  endArena(loser) {
+    const match = this.arenas.get(loser.map);
+    if (!match || match.over) return;
+    match.over = true;
+    const winnerId = match.ids.find(id => id !== loser.socketId);
+    const winner = this.players.get(winnerId);
+    if (winner) {
+      const Ra = winner.char.arenaRating, Rb = loser.char.arenaRating;
+      const Ea = 1 / (1 + Math.pow(10, (Rb - Ra) / 400));
+      const delta = Math.round(ARENA.k * (1 - Ea));
+      winner.char.arenaRating = Ra + delta;
+      loser.char.arenaRating = Math.max(100, Rb - delta);
+      winner.char.arenaWins++;
+      loser.char.arenaLosses++;
+      winner.char.tokens = (winner.char.tokens || 0) + 2;
+      this.systemMsg(`🏆 ${winner.char.name} defeats ${loser.char.name} in the arena! (+${delta} rating → ${winner.char.arenaRating})`);
+    }
+    const arenaId = loser.map;
+    for (const id of match.ids) {
+      const pl = this.players.get(id);
+      if (!pl) continue;
+      pl.dead = false;
+      pl.map = 'world';
+      pl.x = SPAWN.x + 10; pl.z = SPAWN.z + 10;
+      pl.hp = Math.max(1, Math.round(pl.derived.maxHp * 0.6));
+      pl.dots = []; pl.slowUntil = 0; pl.stunUntil = 0;
+      pl.socket.emit('map', { map: 'world', x: pl.x, z: pl.z });
+      this.emitSelf(pl);
+      this.emitInv(pl);
+    }
+    this.arenas.delete(arenaId);
+    markDirty();
+  }
+
+  // --- dynamic world events ----------------------------------------------------------
+  tickWorldEvents() {
+    const t = now();
+    if (this.worldEvent) {
+      if (t >= this.worldEvent.until) {
+        if (this.worldEvent.type === 'mist') this.systemMsg('🌫 The green mist over Duskwood fades away.');
+        this.io.emit('worldEvent', { type: this.worldEvent.type, state: 'end' });
+        this.worldEvent = null;
+      } else if (this.worldEvent.type === 'raid' && ![...this.mobs.values()].some(m => m.eventMob && !m.dead)) {
+        this.systemMsg('🛡 The goblin raid has been repelled! Havenbrook thanks its defenders.');
+        this.io.emit('worldEvent', { type: 'raid', state: 'end' });
+        this.worldEvent = null;
+      }
+      return;
+    }
+    if (this.players.size === 0 || Math.random() > 0.10) return; // ~every 5 min avg when populated
+    if (Math.random() < 0.5) {
+      this.worldEvent = { type: 'mist', until: t + 300 };
+      this.systemMsg('🌫 A strange green mist rises over Duskwood Forest — its creatures grow bold! (+50% XP & drops for 5 min)');
+      this.io.emit('worldEvent', { type: 'mist', state: 'start', sec: 300 });
+    } else {
+      this.worldEvent = { type: 'raid', until: t + 600 };
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const mob = this.addMob('raider', MOBS.wolf, 'world',
+          SPAWN.x + Math.cos(a) * (TOWN_RADIUS + 25), SPAWN.z + Math.sin(a) * (TOWN_RADIUS + 25));
+        mob.noRespawn = true;
+        mob.eventMob = true;
+      }
+      this.systemMsg('⚠️ RAID! Feral wolves are circling Havenbrook — drive them off! (+2 🏅 per kill)');
+      this.io.emit('worldEvent', { type: 'raid', state: 'start', sec: 600 });
     }
   }
 
@@ -1881,6 +2080,10 @@ export class GameServer {
 
   clampToMap(map, x, z) {
     if (map === 'world') return clampToWorld(x, z);
+    if (map.startsWith('arena')) {
+      const r = ARENA.size / 2 - 1;
+      return [Math.max(-r, Math.min(r, x)), Math.max(-r, Math.min(r, z))];
+    }
     const w = DUNGEON_LAYOUT.width / 2 - 1;
     return [
       Math.max(-w, Math.min(w, x)),
@@ -1930,6 +2133,9 @@ export class GameServer {
       shards: p.char.shards || 0,
       tokens: p.char.tokens || 0,
       daily: this.ensureDaily(p.char),
+      talents: p.char.talents,
+      talentPoints: TALENT_POINTS(p.char.level) - this.talentsSpent(p.char),
+      arena: { rating: p.char.arenaRating, wins: p.char.arenaWins, losses: p.char.arenaLosses },
     });
   }
 

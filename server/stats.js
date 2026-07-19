@@ -1,6 +1,22 @@
 // Derived-stat computation. The single source of truth for a character's
 // combat numbers — recomputed server-side whenever level/points/gear change.
-import { CLASSES, STAT_EFFECTS, STAT_KEYS, SKILL_UPGRADE_BONUS, ENCHANT } from '../shared/constants.js';
+import { CLASSES, STAT_EFFECTS, STAT_KEYS, SKILL_UPGRADE_BONUS, ENCHANT, TALENTS } from '../shared/constants.js';
+
+// Aggregate all talent effects of a character into one {effectKey: total} map.
+export function talentEffects(char) {
+  const out = {};
+  const tree = TALENTS[char.class] || [];
+  for (const br of tree) {
+    for (const node of br.nodes) {
+      const ranks = char.talents?.[node.id] || 0;
+      if (!ranks) continue;
+      for (const [k, v] of Object.entries(node.effect)) {
+        out[k] = (out[k] || 0) + v * (node.keystone ? 1 : ranks);
+      }
+    }
+  }
+  return out;
+}
 import { SPAWN } from '../shared/worldgen.js';
 
 // enchant levels multiply an item's numbers (+4%/level)
@@ -36,20 +52,23 @@ export function derivedStats(char) {
     bonusHp += (it.hp || 0) * m;
     bonusMp += (it.mp || 0) * m;
   }
-  const maxHp = Math.floor(cls.baseHp + cls.hpPerLevel * (char.level - 1) + s.vit * STAT_EFFECTS.vit.maxHp + bonusHp);
-  const maxMp = Math.floor(cls.baseMp + cls.mpPerLevel * (char.level - 1) + s.int * STAT_EFFECTS.int.maxMp + bonusMp);
+  const te = talentEffects(char);
+  const pct = k => 1 + (te[k] || 0) / 100;
+  const maxHp = Math.floor((cls.baseHp + cls.hpPerLevel * (char.level - 1) + s.vit * STAT_EFFECTS.vit.maxHp + bonusHp) * pct('hpPct'));
+  const maxMp = Math.floor((cls.baseMp + cls.mpPerLevel * (char.level - 1) + s.int * STAT_EFFECTS.int.maxMp + bonusMp) * pct('mpPct'));
   return {
-    stats: s,
+    stats: s, talents: te,
     maxHp, maxMp,
-    attack: Math.floor(10 + char.level * 1.5 + s.str * STAT_EFFECTS.str.attack + bonusAttack),
-    spell: Math.floor(10 + char.level * 1.5 + s.int * STAT_EFFECTS.int.spell + bonusSpell),
-    critPct: Math.min(60, 5 + s.dex * STAT_EFFECTS.dex.critPct),
-    hastePct: Math.min(40, s.dex * STAT_EFFECTS.dex.hastePct),
-    armor: Math.floor(s.str * STAT_EFFECTS.str.armor + bonusArmor),
-    hpRegen: 1 + s.vit * STAT_EFFECTS.vit.hpRegen,
-    mpRegen: 1.5 + s.wis * STAT_EFFECTS.wis.mpRegen,
-    healPower: s.wis * STAT_EFFECTS.wis.healPower,
-    speed: cls.speed,
+    attack: Math.floor((10 + char.level * 1.5 + s.str * STAT_EFFECTS.str.attack + bonusAttack) * pct('atkPct')),
+    spell: Math.floor((10 + char.level * 1.5 + s.int * STAT_EFFECTS.int.spell + bonusSpell) * pct('spellPct')),
+    critPct: Math.min(70, 5 + s.dex * STAT_EFFECTS.dex.critPct + (te.critPct || 0)),
+    hastePct: Math.min(50, s.dex * STAT_EFFECTS.dex.hastePct + (te.hastePct || 0)),
+    armor: Math.floor((s.str * STAT_EFFECTS.str.armor + bonusArmor) * pct('armorPct')),
+    hpRegen: (1 + s.vit * STAT_EFFECTS.vit.hpRegen) * pct('hpRegenPct'),
+    mpRegen: (1.5 + s.wis * STAT_EFFECTS.wis.mpRegen) * pct('mpRegenPct'),
+    healPower: s.wis * STAT_EFFECTS.wis.healPower * pct('wisPctFlat'),
+    speed: cls.speed * pct('speedPct'),
+    lifestealPct: te.lifestealPct || 0,
   };
 }
 

@@ -369,6 +369,20 @@ h2 { font-family: 'Press Start 2P', monospace; font-size: 20px; color: var(--gol
 .tt-diff-up { color: var(--accent2); }
 .tt-diff-down { color: #ff7675; }
 
+/* talents */
+.talent-cols { display: flex; gap: 8px; padding: 10px 14px; }
+.talent-col { flex: 1; background: #0d1120; border-radius: 8px; padding: 8px 6px; }
+.talent-col h4 { font-size: 12px; text-align: center; margin-bottom: 8px; color: var(--gold); }
+.tnode {
+  display: flex; align-items: center; gap: 6px; padding: 5px 4px; border-radius: 6px;
+  font-size: 11px; cursor: pointer; border: 1px solid transparent; margin-bottom: 3px;
+}
+.tnode:hover { border-color: var(--accent); }
+.tnode.locked { opacity: .35; cursor: default; }
+.tnode.maxed { border-color: var(--accent2); }
+.tnode.keystone { background: rgba(124, 92, 255, .15); border: 1px solid var(--accent); font-weight: 700; }
+.tnode .tn-rank { margin-left: auto; color: var(--gold); font-weight: 800; }
+
 /* trade */
 .trade-cols { display: flex; gap: 10px; padding: 10px 14px 0; }
 .trade-col { flex: 1; background: #0d1120; border-radius: 8px; padding: 8px; }

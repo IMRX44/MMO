@@ -560,6 +560,38 @@ export class WorldRenderer {
     g.add(exit);
   }
 
+  buildArena() {
+    const g = this.dungeonObjects;
+    g.clear();
+    const S = 22;
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(S, S), M(0x8a7d5c));
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    g.add(floor);
+    // sand circle + pillars + torches
+    const ring = new THREE.Mesh(new THREE.RingGeometry(S / 2 - 2, S / 2 - 1.6, 32), new THREE.MeshBasicMaterial({ color: 0xd9bd75, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.05;
+    g.add(ring);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const pillar = box(1.1, 5, 1.1, M(0x9aa3ad), Math.cos(a) * (S / 2 - 0.5), 2.5, Math.sin(a) * (S / 2 - 0.5));
+      g.add(pillar);
+      const flame = box(0.4, 0.5, 0.4, new THREE.MeshLambertMaterial({ color: 0xff9800, emissive: 0xff5722, emissiveIntensity: 1 }),
+        Math.cos(a) * (S / 2 - 0.5), 5.3, Math.sin(a) * (S / 2 - 0.5));
+      g.add(flame);
+      if (i % 2 === 0) {
+        const l = new THREE.PointLight(0xff8844, 22, 20);
+        l.position.set(Math.cos(a) * (S / 2 - 0.5), 4.5, Math.sin(a) * (S / 2 - 0.5));
+        g.add(l);
+      }
+    }
+    // low walls
+    for (const [w, h, d, x, z] of [[S + 2, 2, 1, 0, S / 2 + 0.5], [S + 2, 2, 1, 0, -S / 2 - 0.5], [1, 2, S + 2, S / 2 + 0.5, 0], [1, 2, S + 2, -S / 2 - 0.5, 0]]) {
+      g.add(box(w, h, d, M(0x6c7a89), x, 1, z));
+    }
+  }
+
   setMap(map, scene) {
     if (this.currentMap === map) return;
     this.currentMap = map;
@@ -570,6 +602,11 @@ export class WorldRenderer {
       for (const [, c] of this.chunks) scene.add(c);
       scene.background = new THREE.Color(0x8ecbe8);
       scene.fog = new THREE.Fog(0xa8d5ea, 80, 220);
+    } else if (map.startsWith('arena')) {
+      this.buildArena();
+      scene.add(this.dungeonObjects);
+      scene.background = new THREE.Color(0xd9a55a);
+      scene.fog = new THREE.Fog(0xd9a55a, 30, 90);
     } else {
       this.buildDungeon();
       scene.add(this.dungeonObjects);

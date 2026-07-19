@@ -257,6 +257,110 @@ export const MOUNTS = {
   frostwhelp: { name: 'Frost Whelp',   nameFa: 'بچه‌اژدهای یخ', speedMult: 2.1, model: 'frostwhelp', scale: 1.0 },
 };
 
+// ---------------------------------------------------------------------------
+// Talent trees: 3 branches per class, 4 rankable passives + 1 keystone each.
+// 1 talent point every 2 levels. Nodes unlock top-to-bottom within a branch.
+// Effect keys are consumed by server stats/combat code — never by the client.
+// ---------------------------------------------------------------------------
+export const TALENT_POINTS = level => Math.floor(level / 2);
+export const TALENT_RESPEC_COST = level => 100 * level;
+
+function branch(id, name, icon, smalls, keystone) {
+  return {
+    id, name, icon,
+    nodes: [
+      ...smalls.map((s, i) => ({ id: `${id}_${i}`, name: s[0], max: 3, effect: { [s[1]]: s[2] }, desc: s[3] })),
+      { id: `${id}_key`, name: keystone[0], max: 1, keystone: true, effect: keystone[1], desc: keystone[2] },
+    ],
+  };
+}
+
+export const TALENTS = {
+  warrior: [
+    branch('w_bul', 'Bulwark', '🛡', [
+      ['Iron Skin', 'armorPct', 5, '+5% armor per rank'],
+      ['Vigor', 'hpPct', 4, '+4% max HP per rank'],
+      ['Unbreakable', 'shieldPct', 8, '+8% shields received per rank'],
+      ['Stalwart', 'hpRegenPct', 10, '+10% HP regen per rank'],
+    ], ['Fortress', { fortress: 1 }, 'Every 10% HP missing grants +4% armor']),
+    branch('w_ber', 'Berserker', '🗡', [
+      ['Rage', 'atkPct', 4, '+4% attack per rank'],
+      ['Frenzy', 'hastePct', 3, '+3% haste per rank'],
+      ['Bloodlust', 'lifestealPct', 2, '+2% lifesteal per rank'],
+      ['Brutality', 'critPct', 3, '+3% crit per rank'],
+    ], ['Last Stand', { lastStand: 1 }, 'Below 30% HP: +40% damage, -20% armor']),
+    branch('w_war', 'Warlord', '⛓', [
+      ['Commanding', 'aoeRadiusPct', 6, '+6% AoE radius per rank'],
+      ['Relentless', 'cdrPct', 3, '+3% cooldown reduction per rank'],
+      ['Momentum', 'speedPct', 3, '+3% move speed per rank'],
+      ['Veteran', 'xpPct', 4, '+4% XP per rank'],
+    ], ['Iron Grip', { stunDurPct: 50 }, 'Your stuns last 50% longer']),
+  ],
+  mage: [
+    branch('m_fro', 'Frost', '❄', [
+      ['Deep Chill', 'slowPowerPct', 10, '+10% slow strength per rank'],
+      ['Ice Barrier', 'armorPct', 5, '+5% armor per rank'],
+      ['Clarity', 'mpRegenPct', 8, '+8% mana regen per rank'],
+      ['Winter Focus', 'spellPct', 4, '+4% spell power per rank'],
+    ], ['Permafrost', { slowBolt: 1 }, 'Arcane Bolt chills targets 20% for 2s']),
+    branch('m_fir', 'Fire', '🔥', [
+      ['Kindle', 'dotDamagePct', 8, '+8% damage-over-time per rank'],
+      ['Combustion', 'critPct', 3, '+3% crit per rank'],
+      ['Inferno', 'spellPct', 4, '+4% spell power per rank'],
+      ['Heat Haste', 'hastePct', 3, '+3% haste per rank'],
+    ], ['Ignition', { burnCrit: 1 }, 'Your crits set targets on fire']),
+    branch('m_sto', 'Storm', '⚡', [
+      ['Conductivity', 'spellPct', 4, '+4% spell power per rank'],
+      ['Static', 'hastePct', 3, '+3% haste per rank'],
+      ['Overflow', 'mpPct', 5, '+5% max mana per rank'],
+      ['Tempest', 'aoeRadiusPct', 6, '+6% AoE radius per rank'],
+    ], ['Stormcall', { chainJumps: 2 }, 'Chain Lightning jumps 2 extra times']),
+  ],
+  ranger: [
+    branch('r_sni', 'Sniper', '🎯', [
+      ['Deadeye', 'critPct', 3, '+3% crit per rank'],
+      ['Piercing Rounds', 'atkPct', 4, '+4% attack per rank'],
+      ['Steady Hands', 'hastePct', 3, '+3% haste per rank'],
+      ['Long Shot', 'rangePct', 5, '+5% skill range per rank'],
+    ], ['Executioner', { execute: 25 }, '+25% damage to targets below 30% HP']),
+    branch('r_ven', 'Venom', '☠', [
+      ['Toxic Coating', 'dotDamagePct', 8, '+8% damage-over-time per rank'],
+      ['Numbing Poison', 'slowPowerPct', 10, '+10% slow strength per rank'],
+      ['Adder Speed', 'hastePct', 3, '+3% haste per rank'],
+      ['Malice', 'atkPct', 4, '+4% attack per rank'],
+    ], ['Plaguebringer', { dotDamagePct: 40 }, 'Damage-over-time +40%']),
+    branch('r_bea', 'Beastmaster', '🦅', [
+      ['Wild Stride', 'speedPct', 3, '+3% move speed per rank'],
+      ['Instincts', 'critPct', 3, '+3% crit per rank'],
+      ['Endurance', 'hpPct', 4, '+4% max HP per rank'],
+      ['Forager', 'xpPct', 4, '+4% XP per rank'],
+    ], ['Alpha', { atkPct: 10, speedPct: 8 }, '+10% attack and +8% speed']),
+  ],
+  priest: [
+    branch('p_ora', 'Oracle', '✨', [
+      ['Grace', 'healPct', 6, '+6% healing per rank'],
+      ['Serenity', 'mpRegenPct', 8, '+8% mana regen per rank'],
+      ['Devotion', 'wisPctFlat', 4, '+4% healing power per rank'],
+      ['Sanctuary', 'hpPct', 4, '+4% max HP per rank'],
+    ], ['Miracle', { healPct: 25 }, 'All healing +25%']),
+    branch('p_sha', 'Shadow', '🌑', [
+      ['Dark Word', 'spellPct', 4, '+4% spell power per rank'],
+      ['Torment', 'critPct', 3, '+3% crit per rank'],
+      ['Shadowstep', 'hastePct', 3, '+3% haste per rank'],
+      ['Drain', 'lifestealPct', 2, '+2% lifesteal per rank'],
+    ], ['Void Judgement', { spellPct: 15 }, '+15% spell power']),
+    branch('p_gua', 'Guardian', '🕊', [
+      ['Aegis', 'shieldPct', 8, '+8% shields per rank'],
+      ['Bastion', 'armorPct', 5, '+5% armor per rank'],
+      ['Warding', 'hpPct', 4, '+4% max HP per rank'],
+      ['Composure', 'cdrPct', 3, '+3% cooldown reduction per rank'],
+    ], ['Divine Bulwark', { shieldPct: 30 }, 'Shields you cast +30%']),
+  ],
+};
+
+// Arena (1v1, Elo rating)
+export const ARENA = { startRating: 1000, k: 32, size: 22, countdownSec: 3 };
+
 // Guilds (Phase 3): shared identity, bank, level perks.
 export const GUILD = {
   createCost: 500, maxMembers: 30,

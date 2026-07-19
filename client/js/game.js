@@ -74,6 +74,15 @@ export class GameClient {
       if (wb.state === 'alive') { this.ui.announce(`🌋 ${wb.name} HAS AWOKEN!`, '#ff5b4d'); sfx.enrage(); }
     });
     net.on('worldBossStatus', list => this.ui.setWorldBossList(list));
+    net.on('worldEvent', e => {
+      if (e.type === 'mist' && e.state === 'start') {
+        this.ui.announce('🌫 GREEN MIST over Duskwood!', '#7cffb2');
+        this.mistUntil = Date.now() + (e.sec || 300) * 1000;
+      } else if (e.type === 'raid' && e.state === 'start') {
+        this.ui.announce('⚠️ RAID ON HAVENBROOK!', '#ff5b4d');
+        sfx.enrage();
+      } else if (e.state === 'end') this.mistUntil = 0;
+    });
     this.shake = 0;
 
     this.animate();
@@ -630,6 +639,12 @@ export class GameClient {
       this.sun.position.set(ct.x + 40, ct.y + 80, ct.z + 20);
       this.sun.target.position.set(ct.x, ct.y, ct.z);
       this.sun.target.updateMatrixWorld();
+      // green mist tint while the forest event runs and we're in the forest
+      if (this.map === 'world' && this.scene.fog) {
+        const misty = this.mistUntil && Date.now() < this.mistUntil;
+        const target = misty ? 0x9fd6a8 : 0xa8d5ea;
+        this.scene.fog.color.lerp(new THREE.Color(target), dt * 0.8);
+      }
       this.world.update(this.scene, px, pz, dt, t);
       this.ui.updateZone(this.map, px, pz);
       this.ui.updateInteractPrompt(this, px, pz);
