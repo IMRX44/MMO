@@ -27,8 +27,9 @@ export class GameClient {
     this.clock = new THREE.Clock();
     this.selfSpeed = 9;
     this.mounted = null;
-    // prediction state
+    // prediction state + short history for latency-compensated reconciliation
     this.pred = { x: 0, z: 0, active: false };
+    this.predHistory = [];
     this.camTarget = new THREE.Vector3();
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -299,12 +300,31 @@ export class GameClient {
       if (rig) rig.position.y = mountKey ? 1.15 : 0;
     }
 
-    // self position correction (reconciliation)
+    // self reconciliation: compare the server's position against where WE
+    // were ~150ms ago (the state the server was reacting to), not where we
+    // are now — otherwise honest latency reads as error and yanks us back.
     if (id === this.selfId && this.pred.active) {
-      const errX = data.x - this.pred.x, errZ = data.z - this.pred.z;
-      const err = Math.hypot(errX, errZ);
-      if (err > 5) { this.pred.x = data.x; this.pred.z = data.z; } // hard snap (teleport/dash)
-      else { this.pred.x += errX * 0.18; this.pred.z += errZ * 0.18; } // gentle pull
+      const delay = 0.15;
+      const tNow = performance.now() / 1000;
+      let past = null;
+      for (let i = this.predHistory.length - 1; i >= 0; i--) {
+        if (this.predHistory[i].t <= tNow - delay) { past = this.predHistory[i]; break; }
+      }
+      const refX = past ? past.x : this.pred.x;
+      const refZ = past ? past.z : this.pred.z;
+      const err = Math.hypot(data.x - refX, data.z - refZ);
+      if (err > 8) {
+        // teleport / dash / hard desync: snap to server, extrapolated forward
+        const li = this.lastIntent || { x: 0, z: 0 };
+        this.pred.x = data.x + li.x * this.selfSpeed * delay;
+        this.pred.z = data.z + li.z * this.selfSpeed * delay;
+        this.predHistory.length = 0;
+      } else if (err > 1.5) {
+        // real drift: nudge softly toward the server's view
+        this.pred.x += (data.x - refX) * 0.1;
+        this.pred.z += (data.z - refZ) * 0.1;
+      }
+      // err <= 1.5 units: dead zone — trust the prediction, stay silky
     }
   }
 
@@ -591,6 +611,11 @@ export class GameClient {
           this.pred.z = Math.max(-148, Math.min(0, nz));
         }
       }
+      // record where we predicted ourselves to be, so reconciliation can
+      // compare the server's (delayed) view against our matching past state
+      const nowSec = performance.now() / 1000;
+      this.predHistory.push({ t: nowSec, x: this.pred.x, z: this.pred.z });
+      while (this.predHistory.length && this.predHistory[0].t < nowSec - 0.6) this.predHistory.shift();
     }
 
     // ── entity positions

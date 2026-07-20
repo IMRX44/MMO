@@ -121,6 +121,7 @@ async function enterGame(charInfo) {
   show('screen-game');
   if (!game) {
     game = new GameClient($('game-canvas'), net, ui);
+    window.__vf = game; // debug handle
     initMobile(game);
   }
   game.selfId = r.selfId;
