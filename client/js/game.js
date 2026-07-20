@@ -20,9 +20,13 @@ export class GameClient {
     this.entities = new Map();
     this.targetId = null;
     this.keys = {};
+    // camera: target values steered by input, actual values smoothed each frame
     this.camAngle = Math.PI;
     this.camPitch = 0.85;
     this.camDist = 24;
+    this.camTargetAngle = Math.PI;
+    this.camTargetPitch = 0.85;
+    this.camTargetDist = 24;
     this.fx = [];
     this.clock = new THREE.Clock();
     this.selfSpeed = 9;
@@ -125,21 +129,33 @@ export class GameClient {
     });
     window.addEventListener('keyup', e => { this.keys[e.code] = false; });
 
-    let dragging = false, lastX = 0, lastY = 0;
+    // ── camera controls (MMO standard): drag right → view turns right.
+    // Both mouse buttons rotate; a left CLICK (no drag) still targets.
+    // Sensitivity + horizontal invert live in Settings [O].
+    const sens = () => 0.008 * (+(localStorage.getItem('vf_cam_sens') ?? 1));
+    const inv = () => (localStorage.getItem('vf_cam_invert') === '1' ? -1 : 1);
+    let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, moved = false, downBtn = -1;
     canvas.addEventListener('contextmenu', e => e.preventDefault());
     canvas.addEventListener('mousedown', e => {
-      if (e.button === 2) { dragging = true; lastX = e.clientX; lastY = e.clientY; }
-      if (e.button === 0) this.clickTarget(e);
+      if (e.button === 0 || e.button === 2) {
+        dragging = true; moved = false; downBtn = e.button;
+        lastX = downX = e.clientX; lastY = downY = e.clientY;
+      }
     });
-    window.addEventListener('mouseup', () => { dragging = false; });
+    window.addEventListener('mouseup', e => {
+      if (dragging && downBtn === 0 && !moved) this.clickTarget(e); // clean click = target
+      dragging = false; downBtn = -1;
+    });
     window.addEventListener('mousemove', e => {
       if (!dragging) return;
-      this.camAngle -= (e.clientX - lastX) * 0.008;
-      this.camPitch = Math.max(0.22, Math.min(1.35, this.camPitch + (e.clientY - lastY) * 0.005));
+      if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) > 5) moved = true;
+      if (!moved) return;
+      this.camTargetAngle += (e.clientX - lastX) * sens() * inv();
+      this.camTargetPitch = Math.max(0.22, Math.min(1.35, this.camTargetPitch - (e.clientY - lastY) * 0.005));
       lastX = e.clientX; lastY = e.clientY;
     });
     canvas.addEventListener('wheel', e => {
-      this.camDist = Math.max(9, Math.min(50, this.camDist + e.deltaY * 0.02));
+      this.camTargetDist = Math.max(9, Math.min(50, this.camTargetDist + e.deltaY * 0.02));
     });
   }
 
@@ -651,6 +667,17 @@ export class GameClient {
       if (ent.mountObj) ent.mountObj.userData.animate?.(t, moving);
       // certified clowns honk as they walk 🤡🔊
       if (ent.isPlayer && ent.data.name?.startsWith('🤡') && moving && Math.random() < 0.003) sfx.honk();
+    }
+
+    // ── camera: exponential damping toward targets (buttery rotation/zoom)
+    {
+      const k = 1 - Math.exp(-dt * 14);
+      let dA = this.camTargetAngle - this.camAngle;
+      while (dA > Math.PI) { dA -= Math.PI * 2; this.camTargetAngle -= Math.PI * 2; }
+      while (dA < -Math.PI) { dA += Math.PI * 2; this.camTargetAngle += Math.PI * 2; }
+      this.camAngle += dA * k;
+      this.camPitch += (this.camTargetPitch - this.camPitch) * k;
+      this.camDist += (this.camTargetDist - this.camDist) * (1 - Math.exp(-dt * 8));
     }
 
     // ── camera (smoothed follow)

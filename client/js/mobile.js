@@ -44,8 +44,8 @@ export function initMobile(game) {
         setKnob(dx, dy);
         game.touchMove = { x: dx / R, z: dy / R };
       } else if (t.identifier === camId) {
-        game.camAngle -= (t.clientX - camLast.x) * 0.010;
-        game.camPitch = Math.max(0.22, Math.min(1.35, game.camPitch + (t.clientY - camLast.y) * 0.006));
+        game.camTargetAngle += (t.clientX - camLast.x) * 0.010;
+        game.camTargetPitch = Math.max(0.22, Math.min(1.35, game.camTargetPitch - (t.clientY - camLast.y) * 0.006));
         camLast = { x: t.clientX, y: t.clientY };
       }
     }

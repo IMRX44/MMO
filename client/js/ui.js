@@ -57,6 +57,11 @@ export class UI {
     vm.value = getMusicVolume(); vs.value = getSfxVolume();
     vm.addEventListener('input', () => setMusicVolume(+vm.value));
     vs.addEventListener('input', () => { setSfxVolume(+vs.value); sfx.ui(); });
+    const cs = $('cam-sens'), ci = $('cam-invert');
+    cs.value = localStorage.getItem('vf_cam_sens') ?? 1;
+    ci.checked = localStorage.getItem('vf_cam_invert') === '1';
+    cs.addEventListener('input', () => localStorage.setItem('vf_cam_sens', cs.value));
+    ci.addEventListener('change', () => localStorage.setItem('vf_cam_invert', ci.checked ? '1' : '0'));
     window.addEventListener('keydown', e => {
       if (document.activeElement?.tagName === 'INPUT') return;
       if (e.code === 'KeyO') this.togglePanel('panel-settings');
