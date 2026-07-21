@@ -2,7 +2,7 @@
 
 پرامت‌های AI برای **همه‌ی چیزهایی که توی نقشه می‌بینی**: درخت‌ها، سنگ‌ها، رگه‌های معدن،
 گیاهان، تزئینات هر بایوم، ساختمان‌های شهر و پراپ‌ها.
-(پرامت کارکترها/مانسترها/باس‌ها/مرکب‌ها جدا توی `PROMPTS.md` است — ۲۰ فایل.)
+(پرامت کارکترها/مانسترها/باس‌ها/مرکب‌ها جدا توی `PROMPTS.md` است — ۲۶ فایل.)
 
 ## 📌 قرارداد فنی (برای همه‌ی فایل‌های این سند)
 
@@ -180,7 +180,7 @@ plain light gray background, no ground plane, no shadows
 
 ---
 
-## ✅ چک‌لیست کامل (۳۹ فایل محیط + ۲۰ فایل کارکتر = ۵۹ اسِت)
+## ✅ چک‌لیست کامل (۳۹ فایل محیط + ۲۶ فایل کارکتر = ۶۵ اسِت)
 
 | گروه | فایل‌ها |
 |---|---|
@@ -191,7 +191,7 @@ plain light gray background, no ground plane, no shadows
 | تزئین | `env_deco_grass/flower/bush/mushroom/cactus/bones/iceshard/snowrock/obsidian/lavapool` (۱۰) |
 | شهر | `env_house/fountain/stall/forge/banner/tent` (۶) |
 | پراپ | `env_chest/portal/campfire` (۳) |
-| کارکتر و... | → `PROMPTS.md` (۲۰) |
+| کارکتر و... | → `PROMPTS.md` (۲۶) |
 
 **ترتیب پیشنهادی ساخت (بیشترین اثر بصری اول):**
 1. `env_wood_t1` و `env_wood_t2` (پرتکرارترین شیء نقشه!)

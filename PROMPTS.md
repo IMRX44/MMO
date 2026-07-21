@@ -76,7 +76,7 @@ plain light gray background, game asset concept art, no shadows on ground
 
 ---
 
-## 💀 دانجن‌ها (۳ فایل)
+## 💀 دانجن‌ها (۷ فایل)
 
 ### `skeleton.glb` — Risen Skeleton (تِرَش دخمه)
 > …same style prefix… — **an undead skeleton warrior, bone-white body, cracked skull with glowing hollow eye sockets, rusty sword in hand, broken ancient armor pieces**
@@ -86,6 +86,18 @@ plain light gray background, game asset concept art, no shadows on ground
 
 ### `infernal.glb` — 👑 باس: Kargath, Infernal Colossus
 > …same style prefix… — **a colossal infernal fire titan boss, gigantic body made of black volcanic rock and flowing lava, crown of orange flame spikes, glowing magma veins across entire body, wielding an enormous molten warhammer, molten core burning in chest, apocalyptic presence**
+
+### `spider.glb` — Duskweb Spider (تِرَش گودال نجواگر)
+> …same style prefix… — **a menacing forest spider monster, dark purple-black chunky body, four glowing red eyes, eight angular segmented legs, venom dripping from small fangs, web strands trailing**
+
+### `pharaoh.glb` — 👑 باس: The Nameless Pharaoh (زیگورات)
+> …same style prefix… — **an undead pharaoh boss, mummy wrapped in ancient bandages wearing a blue-and-gold striped nemes headdress with a golden cobra, golden death mask, wide golden collar necklace, holding a golden crook scepter, regal and terrifying, sand swirling at feet**
+
+### `frostdragon.glb` — 👑 باس: Iceborn, the Glacier Dragon (قلب یخچال)
+> …same style prefix… — **an ice dragon boss, pale blue crystalline scale body, translucent frozen ice wings, white horns, glowing deep-blue eyes, frost breath wisps from nostrils, ice spikes along spine and tail, majestic and cold**
+
+### `groldan.glb` — 🌋 باس جهانی: Groldan, the Hungering Maw
+> …same style prefix… — **a colossal sand worm world boss bursting from the ground, segmented sandy-brown armored body rising in a curve, gigantic circular maw filled with rings of white teeth, dark red gullet, small orange eyes on the head segment, cracked earth and dust around its base, terrifying scale**
 
 ---
 
@@ -103,6 +115,9 @@ plain light gray background, game asset concept art, no shadows on ground
 ### `magmasteed.glb` — Magma Steed (اسب مذاب، T5)
 > …same style prefix (standing side view)… — **a demonic horse mount made of black volcanic rock, glowing orange lava cracks across body and legs, mane and tail made of living flame, burning hoofprints, obsidian saddle, smoldering ember eyes**
 
+### `frostwhelp.glb` — Frost Whelp (بچه‌اژدهای یخ — دراپ نادر باس Iceborn)
+> …same style prefix (standing side view)… — **a cute baby ice dragon mount, pale blue crystalline scales, small translucent ice wings, stubby legs, tiny white horns, big friendly glowing blue eyes, small leather saddle, frost sparkles around it**
+
 ---
 
 ## ✅ چک‌لیست اسم فایل‌ها
@@ -116,7 +131,13 @@ plain light gray background, game asset concept art, no shadows on ground
 | `yeti.glb` `wraith.glb` | Frostpeak Tundra |
 | `golem.glb` `demon.glb` | Ashen Wastes |
 | `skeleton.glb` `boneKing.glb` | Crypt of the Fallen King |
+| `spider.glb` | Whispering Hollow |
+| `pharaoh.glb` | Sunken Ziggurat |
+| `frostdragon.glb` | Glacier Heart |
 | `infernal.glb` | Molten Forge Depths |
-| `horse.glb` `direwolf.glb` `magmasteed.glb` | مرکب‌ها |
+| `groldan.glb` | باس جهانی |
+| `horse.glb` `direwolf.glb` `magmasteed.glb` `frostwhelp.glb` | مرکب‌ها |
+
+**جمع: ۲۶ فایل کارکتر/مانستر/باس/مرکب + ۳۹ فایل محیط (`ASSET_PROMPTS.md`) = ۶۵ اسِت**
 
 هر فایلی که آماده شد بده به من تا اگه scale/جهت‌گیریش نیاز به تنظیم داشت توی کد لودر درستش کنم.

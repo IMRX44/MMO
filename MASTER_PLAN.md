@@ -567,7 +567,7 @@ Postgres + Redis + Docker + دیپلوی عمومی + کانال‌ها + مان
 (بخش ۳ + ۴.۳؛ این پیوست تنها جای مجاز برای copy عدد به کد است — single source of truth)
 
 ## پیوست B — پایپ‌لاین اسِت‌ها
-- کارکتر/موب/باس/مرکب: **PROMPTS.md** (۲۰ پرامت) → `client/models/<name>.glb`
+- کارکتر/موب/باس/مرکب: **PROMPTS.md** (۲۶ پرامت) → `client/models/<name>.glb`
 - محیط (درخت/سنگ/گیاه/شهر/پراپ): **ASSET_PROMPTS.md** (۴۵+ پرامت) → `client/models/<env_name>.glb`
 - قرارداد: پا روی y=0، جهت +Z، مقیاس طبق جدول ASSET_PROMPTS، بدون زمین/سایه‌ی پخته.
 - هر GLB که در پوشه باشد **بدون تغییر کد** جایگزین placeholder می‌شود (loader ها ✅).
