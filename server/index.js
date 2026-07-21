@@ -178,6 +178,7 @@ io.on('connection', socket => {
   socket.on('trade',        guard(d => game.onTradeAction(player, d)));
   socket.on('guild',        guard(d => game.onGuild(player, d)));
   socket.on('market',       guard(d => game.onMarket(player, d)));
+  socket.on('vendor',       guard(d => game.onVendor(player, d)));
   socket.on('talent',       guard(d => game.onTalent(player, String(d?.nodeId))));
   socket.on('respecTalents',guard(() => game.onRespecTalents(player)));
   socket.on('arena',        guard(d => game.onArena(player, String(d?.action))));

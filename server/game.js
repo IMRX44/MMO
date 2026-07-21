@@ -8,7 +8,7 @@ import {
   PVP_BIOME, INVENTORY_SIZE, RESPEC_COST,
   GATHER, RECIPES, MOUNTS, CHESTS,
   STAMINA, ENCHANT, PITY_SHARDS, itemTier, profLevel, PROF_GATES,
-  WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE, GUILD, MARKET, NAME_RE,
+  WORLD_BOSSES, DAILY_REWARDS, DAILY_QUESTS, SHRINE, GUILD, MARKET, NAME_RE, NPC_VENDOR,
   TALENTS, TALENT_POINTS, TALENT_RESPEC_COST, ARENA, SEASON, FISHING, MEALS,
 } from '../shared/constants.js';
 import { track } from './telemetry.js';
@@ -926,6 +926,63 @@ export class GameServer {
     if (!pot || p.char.gold < pot.price * qty) return;
     p.char.gold -= pot.price * qty;
     p.char.potions[kind] = (p.char.potions[kind] || 0) + qty;
+    this.emitSelf(p); this.emitInv(p);
+    markDirty();
+  }
+
+  // --- town NPC vendor (fixed shop, server-validated) ------------------------------
+  atVendor(p) {
+    return p.map === 'world' && !p.dead &&
+      Math.hypot(p.x - NPC_VENDOR.pos.x, p.z - NPC_VENDOR.pos.z) <= NPC_VENDOR.range;
+  }
+
+  onVendor(p, data) {
+    if (!this.atVendor(p)) {
+      p.socket.emit('event', { type: 'system', text: 'Walk up to Merchant Bram in Havenbrook first.' });
+      return;
+    }
+    const action = data?.action;
+    if (action === 'buyPotion') {
+      const entry = NPC_VENDOR.potions.find(e => e.kind === String(data.kind));
+      const qty = Math.max(1, Math.min(50, Math.floor(Number(data.qty) || 1)));
+      if (!entry || p.char.gold < entry.price * qty) return;
+      p.char.gold -= entry.price * qty;
+      p.char.potions[entry.kind] = (p.char.potions[entry.kind] || 0) + qty;
+      p.socket.emit('event', { type: 'system', text: `Bought ${qty}× ${POTIONS[entry.kind].name}.` });
+    } else if (action === 'buyGear') {
+      const g = NPC_VENDOR.gear.find(e => e.id === String(data.id));
+      if (!g) return;
+      if (p.char.gold < g.price) { p.socket.emit('event', { type: 'system', text: 'Not enough gold.' }); return; }
+      if (p.char.inventory.length >= INVENTORY_SIZE) { p.socket.emit('event', { type: 'system', text: 'Inventory full.' }); return; }
+      p.char.gold -= g.price;
+      const item = {
+        id: 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+        name: g.name, slot: g.slot, level: g.level, rarity: g.rarity,
+        attack: g.attack || 0, spell: g.spell || 0, armor: g.armor || 0, hp: g.hp || 0,
+        stats: { ...g.stats }, sellValue: g.sellValue,
+      };
+      p.char.inventory.push(item);
+      p.socket.emit('loot', { item });
+      p.socket.emit('event', { type: 'system', text: `Bought ${g.name}.` });
+    } else if (action === 'sell') {
+      const idx = p.char.inventory.findIndex(i => i.id === String(data.itemId));
+      if (idx === -1) return;
+      const [item] = p.char.inventory.splice(idx, 1);
+      const value = Math.max(1, item.sellValue || 1);
+      p.char.gold += value;
+      p.socket.emit('event', { type: 'system', text: `Sold ${item.name} for ${value}g.` });
+    } else if (action === 'sellAllJunk') {
+      // convenience: sell every common/uncommon item that isn't equipped
+      let total = 0, count = 0;
+      p.char.inventory = p.char.inventory.filter(item => {
+        if ((item.rarity === 'common' || item.rarity === 'uncommon') && !item.enchant) {
+          total += Math.max(1, item.sellValue || 1); count++;
+          return false;
+        }
+        return true;
+      });
+      if (count) { p.char.gold += total; p.socket.emit('event', { type: 'system', text: `Sold ${count} items for ${total}g.` }); }
+    } else return;
     this.emitSelf(p); this.emitInv(p);
     markDirty();
   }

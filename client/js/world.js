@@ -6,7 +6,7 @@ import {
   heightAt, groundHeight, biomeAt, decorationAt, resourceAt, structuresNear,
   WATER_LEVEL, TILE, WORLD_SIZE, SPAWN, TOWN_RADIUS, TOWN_HEIGHT, inTown, fbm, WORLD_SEED,
 } from '/shared/worldgen.js';
-import { DUNGEONS } from '/shared/constants.js';
+import { DUNGEONS, NPC_VENDOR } from '/shared/constants.js';
 
 const CHUNK = 20;         // tiles per chunk side
 const VIEW_CHUNKS = 4;
@@ -397,6 +397,43 @@ function buildTown() {
     const a = (i / 24) * Math.PI * 2;
     g.add(box(1.6, 0.12, 1.6, MAT.stoneWall, Math.cos(a) * 16, y + 0.02, Math.sin(a) * 16));
   }
+
+  // ── Merchant Bram: NPC vendor with a market counter and floating sign
+  const npc = new THREE.Group();
+  // counter stall
+  npc.add(box(2.8, 0.9, 1.3, MAT.plank, 0, 0.45, 0.9));
+  npc.add(box(2.9, 0.2, 1.4, MAT.plankDark, 0, 0.95, 0.9));
+  for (const sx of [-1.2, 1.2]) npc.add(box(0.14, 2.3, 0.14, MAT.plankDark, sx, 1.15, 1.5));
+  const canopy = box(3.2, 0.14, 1.9, M(0xf0c040), 0, 2.35, 1.4); canopy.rotation.x = -0.12;
+  npc.add(canopy);
+  npc.add(box(0.6, 0.4, 0.5, M(0xd94f43), -0.7, 1.1, 0.9)); // goods on counter
+  npc.add(box(0.5, 0.5, 0.5, M(0x4a7fb5), 0.6, 1.15, 0.9));
+  // the merchant himself (chunky voxel humanoid behind the counter)
+  const skin = 0xf1c27d;
+  npc.add(box(0.9, 1.1, 0.5, M(0x6b4a8a), 0, 1.55, -0.1));   // torso/robe
+  npc.add(box(0.75, 0.75, 0.75, M(skin), 0, 2.5, -0.1));      // head
+  npc.add(box(0.8, 0.28, 0.8, M(0x8a5a2b), 0, 2.84, -0.13));  // hat/hair
+  npc.add(box(0.12, 0.12, 0.05, M(0x222), -0.18, 2.55, 0.28));
+  npc.add(box(0.12, 0.12, 0.05, M(0x222), 0.18, 2.55, 0.28));
+  npc.add(box(0.5, 0.5, 0.2, M(0xefe6d5), 0, 1.3, -0.1));      // apron
+  npc.position.set(NPC_VENDOR.pos.x, y, NPC_VENDOR.pos.z);
+  npc.rotation.y = Math.PI; // face the plaza
+  g.add(withEnvOverride('env_vendor', npc));
+
+  // floating shop sign
+  const sign = document.createElement('canvas');
+  sign.width = 256; sign.height = 80;
+  const sctx = sign.getContext('2d');
+  sctx.font = 'bold 34px Rubik, sans-serif'; sctx.textAlign = 'center';
+  sctx.fillStyle = 'rgba(0,0,0,0.6)';
+  if (sctx.roundRect) { sctx.beginPath(); sctx.roundRect(8, 12, 240, 52, 12); sctx.fill(); }
+  else sctx.fillRect(8, 12, 240, 52);
+  sctx.fillStyle = '#f5c542';
+  sctx.fillText('🛒 Merchant', 128, 50);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(sign), depthTest: false }));
+  spr.scale.set(4, 1.25, 1);
+  spr.position.set(NPC_VENDOR.pos.x, y + 3.6, NPC_VENDOR.pos.z);
+  g.add(spr);
 
   g.position.set(SPAWN.x, 0, SPAWN.z);
   return g;

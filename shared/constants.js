@@ -395,6 +395,29 @@ export const GUILD = {
   ranks: ['leader', 'officer', 'member'],
 };
 
+// Town NPC vendor: fixed shop at spawn. Sells potions + starter gear,
+// buys any item at its sellValue. Fully server-validated (proximity + gold).
+export const NPC_VENDOR = {
+  name: 'Merchant Bram', nameFa: 'برام بازرگان',
+  pos: { x: 14, z: -6 }, range: 7,
+  potions: [
+    { kind: 'hpPotion', price: 15 },
+    { kind: 'mpPotion', price: 15 },
+  ],
+  // deterministic starter gear (explicit stats — stable, no RNG)
+  gear: [
+    { id: 'v_sword',  name: 'Apprentice Sword',   slot: 'weapon', level: 4, rarity: 'common',   attack: 16, spell: 0,  stats: { str: 4 }, price: 120, sellValue: 24 },
+    { id: 'v_staff',  name: 'Apprentice Staff',   slot: 'weapon', level: 4, rarity: 'common',   attack: 0,  spell: 16, stats: { int: 4 }, price: 120, sellValue: 24 },
+    { id: 'v_bow',    name: 'Apprentice Bow',      slot: 'weapon', level: 4, rarity: 'common',   attack: 15, spell: 0,  stats: { dex: 4 }, price: 120, sellValue: 24 },
+    { id: 'v_helm',   name: 'Leather Cap',         slot: 'head',   level: 4, rarity: 'common',   armor: 8,  hp: 20,  stats: { vit: 2 }, price: 80,  sellValue: 16 },
+    { id: 'v_chest',  name: 'Leather Tunic',       slot: 'chest',  level: 4, rarity: 'common',   armor: 12, hp: 35,  stats: { vit: 3 }, price: 110, sellValue: 22 },
+    { id: 'v_legs',   name: 'Leather Leggings',    slot: 'legs',   level: 4, rarity: 'common',   armor: 10, hp: 28,  stats: { vit: 2 }, price: 95,  sellValue: 19 },
+    { id: 'v_boots',  name: 'Leather Boots',       slot: 'boots',  level: 4, rarity: 'common',   armor: 7,  hp: 18,  stats: { dex: 2 }, price: 70,  sellValue: 14 },
+    { id: 'v_ring',   name: 'Copper Ring',         slot: 'ring',   level: 4, rarity: 'uncommon', attack: 6,  spell: 6,  stats: { dex: 2 }, price: 150, sellValue: 30 },
+    { id: 'v_amulet', name: 'Traveler\'s Amulet',  slot: 'amulet', level: 4, rarity: 'uncommon', attack: 4,  spell: 4,  stats: { vit: 2, wis: 2 }, price: 150, sellValue: 30 },
+  ],
+};
+
 // Town market: player order book, Albion-style economy heart.
 export const MARKET = {
   taxPct: 5, maxOrders: 12, maxPrice: 1_000_000,

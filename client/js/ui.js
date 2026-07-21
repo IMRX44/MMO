@@ -2,7 +2,7 @@
 import {
   CLASSES, QUESTS, DUNGEONS, RARITIES, skillUpgradeCost, MAX_SKILL_LEVEL, EQUIP_SLOTS,
   RECIPES, MAT_NAMES, MAT_ICONS, MOUNTS, GATHER, CHESTS, profLevel, DAILY_QUESTS,
-  TALENTS, SEASON, MEALS,
+  TALENTS, SEASON, MEALS, NPC_VENDOR, POTIONS,
 } from '/shared/constants.js';
 import { biomeAt, TILE, inTown } from '/shared/worldgen.js';
 import { SKILL_ICONS, CLASS_ICONS } from './models.js';
@@ -76,6 +76,15 @@ export class UI {
       });
     });
 
+    this.vendorTab = 'buy';
+    document.querySelectorAll('.vtab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.vendorTab = btn.dataset.vtab;
+        document.querySelectorAll('.vtab').forEach(b => b.classList.toggle('active', b === btn));
+        this.renderVendor();
+      });
+    });
+
     // chat
     const input = $('chat-input');
     window.addEventListener('keydown', e => {
@@ -135,9 +144,16 @@ export class UI {
       if (id === 'panel-guild') { this.net.emit('guild', { action: 'info' }); this.renderGuild(); }
       if (id === 'panel-talents') this.renderTalents();
       if (id === 'panel-market') { this.marketSellMode = false; this.net.emit('market', { action: 'list' }); }
+      if (id === 'panel-vendor') this.renderVendor();
     }
   }
   closePanels() { document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden')); }
+
+  openVendor() {
+    this.vendorTab = this.vendorTab || 'buy';
+    $('panel-vendor').classList.remove('hidden');
+    this.renderVendor();
+  }
 
   // --- hotbar -----------------------------------------------------------------
   buildHotbar() {
@@ -233,6 +249,7 @@ export class UI {
     if (!$('panel-quests').classList.contains('hidden')) this.renderQuests();
     if (!$('panel-craft').classList.contains('hidden')) this.renderCraft();
     if (!$('panel-talents').classList.contains('hidden')) this.renderTalents();
+    if (!$('panel-vendor').classList.contains('hidden')) this.renderVendor();
   }
 
   onGathered(e) {
@@ -756,6 +773,70 @@ export class UI {
   }
 
   // --- market ------------------------------------------------------------------
+  renderVendor() {
+    const body = $('vendor-body');
+    if (!body || !this.inv) return;
+    const gold = this.inv.gold ?? this.self?.gold ?? 0;
+    body.innerHTML = `<div class="tt-muted" style="font-size:12px;margin-bottom:8px">🪙 You have ${gold.toLocaleString()} gold</div>`;
+
+    if (this.vendorTab === 'buy') {
+      // potions
+      for (const e of NPC_VENDOR.potions) {
+        const pot = POTIONS[e.kind];
+        const afford = gold >= e.price;
+        const row = document.createElement('div');
+        row.className = 'craft-row';
+        row.innerHTML = `
+          <div class="cr-icon">${e.kind === 'hpPotion' ? '❤️' : '💙'}</div>
+          <div class="cr-body"><div class="cr-name">${pot.name}</div>
+            <div class="tt-muted" style="font-size:11px">restores ${Math.round((pot.heals || pot.restores) * 100)}%</div></div>
+          <span style="color:var(--gold);font-weight:700">${e.price}g</span>
+          <button class="btn-small v-buyp" data-kind="${e.kind}" ${afford ? '' : 'disabled'}>Buy</button>`;
+        body.appendChild(row);
+      }
+      // gear
+      for (const g of NPC_VENDOR.gear) {
+        const r = RARITIES[g.rarity];
+        const afford = gold >= g.price;
+        const row = document.createElement('div');
+        row.className = 'craft-row';
+        const bits = [g.attack && `Atk +${g.attack}`, g.spell && `Spell +${g.spell}`, g.armor && `Arm +${g.armor}`, g.hp && `HP +${g.hp}`].filter(Boolean).join(' · ');
+        row.innerHTML = `
+          <div class="cr-icon">${this.itemIcon(g)}</div>
+          <div class="cr-body"><div class="cr-name" style="color:${r.color}">${g.name}</div>
+            <div class="tt-muted" style="font-size:11px">iLvl ${g.level} · ${bits}</div></div>
+          <span style="color:var(--gold);font-weight:700">${g.price}g</span>
+          <button class="btn-small v-buyg" data-id="${g.id}" ${afford ? '' : 'disabled'}>Buy</button>`;
+        row.querySelector('.cr-icon').addEventListener('mouseenter', () => this.showItemTooltip({ ...g, id: g.id }, ''));
+        row.querySelector('.cr-icon').addEventListener('mouseleave', () => this.hideTooltip());
+        body.appendChild(row);
+      }
+      body.querySelectorAll('.v-buyp').forEach(b => b.addEventListener('click', () => this.net.emit('vendor', { action: 'buyPotion', kind: b.dataset.kind, qty: 1 })));
+      body.querySelectorAll('.v-buyg').forEach(b => b.addEventListener('click', () => this.net.emit('vendor', { action: 'buyGear', id: b.dataset.id })));
+    } else {
+      // sell tab
+      const items = this.inv.inventory || [];
+      if (!items.length) { body.innerHTML += '<div class="tt-muted">Your bag is empty.</div>'; return; }
+      body.innerHTML += `<button class="btn-small" id="v-selljunk" style="margin-bottom:8px">Sell all junk (common/uncommon)</button>`;
+      for (const item of items) {
+        const r = RARITIES[item.rarity];
+        const row = document.createElement('div');
+        row.className = 'craft-row';
+        row.innerHTML = `
+          <div class="cr-icon">${this.itemIcon(item)}</div>
+          <div class="cr-body"><div class="cr-name" style="color:${r.color}">${item.name}${item.enchant ? ' +' + item.enchant : ''}</div>
+            <div class="tt-muted" style="font-size:11px">${item.slot} · iLvl ${item.level}</div></div>
+          <span style="color:var(--gold);font-weight:700">${Math.max(1, item.sellValue || 1)}g</span>
+          <button class="btn-small v-sell" data-id="${item.id}">Sell</button>`;
+        row.querySelector('.cr-icon').addEventListener('mouseenter', () => this.showItemTooltip(item, ''));
+        row.querySelector('.cr-icon').addEventListener('mouseleave', () => this.hideTooltip());
+        body.appendChild(row);
+      }
+      $('v-selljunk')?.addEventListener('click', () => this.net.emit('vendor', { action: 'sellAllJunk' }));
+      body.querySelectorAll('.v-sell').forEach(b => b.addEventListener('click', () => this.net.emit('vendor', { action: 'sell', itemId: b.dataset.id })));
+    }
+  }
+
   renderMarket() {
     const body = $('market-body');
     if (!body) return;
@@ -865,6 +946,10 @@ export class UI {
     if (game.map !== 'world') {
       if (Math.hypot(x, z) < 7) show(`Press <b>[F]</b> to leave the dungeon`);
       else el.classList.add('hidden');
+      return;
+    }
+    if (Math.hypot(x - NPC_VENDOR.pos.x, z - NPC_VENDOR.pos.z) <= NPC_VENDOR.range) {
+      show(`🛒 <b>${NPC_VENDOR.name}</b> — press <b>[F]</b> to shop`);
       return;
     }
     for (const d of Object.values(DUNGEONS)) {

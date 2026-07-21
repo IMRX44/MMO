@@ -165,6 +165,9 @@ plain light gray background, no ground plane, no shadows
 ### `env_tent.glb` — چادر کمپ
 > — **an adventurer camp tent, weathered dark-red canvas A-frame tent, wooden poles, rolled-up entrance flap, patched fabric, bedroll visible inside**
 
+### `env_vendor.glb` — غرفه‌ی فروشنده NPC (برام بازرگان)
+> — **a friendly merchant NPC standing behind a wooden market counter, chunky voxel human shopkeeper in a purple robe and brown cap with a cream apron, warm smile, golden-yellow striped canopy over the stall, counter piled with colorful goods (potions, fruit, cloth rolls, a small treasure box), inviting shop look**
+
 ---
 
 # 🗝️ بخش ۷ — پراپ‌های تعاملی (۳ فایل)

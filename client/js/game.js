@@ -6,7 +6,7 @@ import { WorldRenderer } from './world.js';
 import { createModel, createMount, animateRig } from './models.js';
 import { Minimap } from './minimap.js';
 import { sfx, unlock as unlockAudio } from './audio.js';
-import { DUNGEONS, GATHER, CHESTS, MOUNTS } from '/shared/constants.js';
+import { DUNGEONS, GATHER, CHESTS, MOUNTS, NPC_VENDOR } from '/shared/constants.js';
 import { walkable, clampToWorld, inTown } from '/shared/worldgen.js';
 
 const INTERP_DELAY = 0.12; // render remote entities 120ms in the past
@@ -216,7 +216,12 @@ export class GameClient {
   tryInteract() {
     if (this.map !== 'world') { this.net.emit('exitDungeon'); return; }
     const x = this.pred.x, z = this.pred.z;
-    // priority: dungeon portal > chest > resource node
+    // priority: vendor > dungeon portal > shrine > chest > node > fish
+    if (Math.hypot(x - NPC_VENDOR.pos.x, z - NPC_VENDOR.pos.z) <= NPC_VENDOR.range) {
+      this.ui.openVendor();
+      sfx.ui();
+      return;
+    }
     for (const [key, d] of Object.entries(DUNGEONS)) {
       if (Math.hypot(x - d.entrance.x, z - d.entrance.z) < 8) {
         this.net.emit('enterDungeon', { id: key });

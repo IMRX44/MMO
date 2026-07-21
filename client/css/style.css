@@ -316,6 +316,9 @@ h2 { font-family: 'Press Start 2P', monospace; font-size: 20px; color: var(--gol
   border: 1px solid var(--panel-border); background: transparent; color: var(--muted);
 }
 .ctab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.vtab { flex: 1; padding: 8px; font-size: 13px; font-weight: 700; border-radius: 7px; border: 1px solid var(--panel-border); background: transparent; color: var(--muted); }
+.vtab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#vendor-body { padding: 10px 14px; overflow-y: auto; max-height: 380px; }
 #craft-list { padding: 10px 14px; overflow-y: auto; }
 .craft-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
 .cr-icon { font-size: 22px; width: 30px; text-align: center; }
