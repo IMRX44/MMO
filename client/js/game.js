@@ -190,6 +190,12 @@ export class GameClient {
     return Math.hypot(ent.root.position.x - this.pred.x, ent.root.position.z - this.pred.z);
   }
 
+  partyIds() {
+    const ids = new Set();
+    for (const m of this.ui.partyMembers || []) ids.add(m.id);
+    return ids;
+  }
+
   setTarget(id) {
     this.targetId = id;
     this.ui.updateTarget(id ? this.entities.get(id)?.data : null);
@@ -329,16 +335,16 @@ export class GameClient {
       const refX = past ? past.x : this.pred.x;
       const refZ = past ? past.z : this.pred.z;
       const err = Math.hypot(data.x - refX, data.z - refZ);
-      if (err > 8) {
+      if (err > 10) {
         // teleport / dash / hard desync: snap to server, extrapolated forward
         const li = this.lastIntent || { x: 0, z: 0 };
         this.pred.x = data.x + li.x * this.selfSpeed * delay;
         this.pred.z = data.z + li.z * this.selfSpeed * delay;
         this.predHistory.length = 0;
       } else if (err > 1.5) {
-        // real drift: nudge softly toward the server's view
-        this.pred.x += (data.x - refX) * 0.1;
-        this.pred.z += (data.z - refZ) * 0.1;
+        // real drift: nudge toward the server's view
+        this.pred.x += (data.x - refX) * 0.15;
+        this.pred.z += (data.z - refZ) * 0.15;
       }
       // err <= 1.5 units: dead zone — trust the prediction, stay silky
     }
@@ -601,16 +607,28 @@ export class GameClient {
     if (this.touchMove) { ix = this.touchMove.x; iz = this.touchMove.z; }
     const len = Math.hypot(ix, iz) || 1;
     ix /= len; iz /= len;
+    // camera-relative: forward = away from camera, right = screen right.
+    // camera sits at +(sin A, cos A) from the player, so forward = (-sin A, -cos A)
+    // and right = (cos A, -sin A). W is iz=-1, D is ix=+1.
     const sin = Math.sin(this.camAngle), cos = Math.cos(this.camAngle);
-    const wx = ix * cos - iz * sin;
-    const wz = ix * sin + iz * cos;
+    const wx = ix * cos + iz * sin;
+    const wz = -ix * sin + iz * cos;
     if (wx || wz) this.face = Math.atan2(wx, wz);
     const sprint = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
     const intent = { x: +wx.toFixed(3), z: +wz.toFixed(3), face: +(this.face || 0).toFixed(3), sprint };
-    if (!this.lastIntent || this.lastIntent.x !== intent.x || this.lastIntent.z !== intent.z ||
-        this.lastIntent.sprint !== sprint || Math.abs((this.lastIntent.face ?? 0) - intent.face) > 0.05) {
+    // send policy: start/stop instantly; direction changes at most 30/s;
+    // steady 10Hz heartbeat while moving so the server never drifts far
+    const nowMs = performance.now();
+    const movingNow = !!(wx || wz);
+    const startStop = movingNow !== this.wasMoving;
+    this.wasMoving = movingNow;
+    const changed = !this.lastIntent || this.lastIntent.x !== intent.x || this.lastIntent.z !== intent.z ||
+        this.lastIntent.sprint !== sprint || Math.abs((this.lastIntent.face ?? 0) - intent.face) > 0.05;
+    const since = nowMs - (this.lastInputAt || 0);
+    if (startStop || (changed && since >= 33) || (movingNow && since >= 100)) {
       this.net.emit('input', intent);
       this.lastIntent = intent;
+      this.lastInputAt = nowMs;
     }
 
     // ── local prediction for self (mirrors server rules)
@@ -707,10 +725,15 @@ export class GameClient {
         this.scene.fog.color.lerp(new THREE.Color(target), dt * 0.8);
       }
       this.world.update(this.scene, px, pz, dt, t);
-      this.ui.updateZone(this.map, px, pz);
-      this.ui.updateInteractPrompt(this, px, pz);
-      this.minimap.updateSmall(px, pz, this.entities, this.selfId, this.map);
-      this.minimap.updateBig(px, pz, this.ui.partyPositions?.() || []);
+      // UI probes (biome sampling, structure scans, canvas maps) are throttled
+      // — they were burning frame budget every single frame
+      if (t - (this.lastUiTick || 0) > 0.12) {
+        this.lastUiTick = t;
+        this.ui.updateZone(this.map, px, pz);
+        this.ui.updateInteractPrompt(this, px, pz);
+        this.minimap.updateSmall(px, pz, this.entities, this.selfId, this.map, this.face || 0, this.partyIds());
+        this.minimap.updateBig(px, pz, this);
+      }
     }
 
     // fx lifecycle

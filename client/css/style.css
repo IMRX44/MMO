@@ -341,9 +341,15 @@ h2 { font-family: 'Press Start 2P', monospace; font-size: 20px; color: var(--gol
 
 /* minimap + world map */
 #minimap {
-  position: absolute; top: 64px; right: 64px; z-index: 5;
-  border-radius: 50%; border: 2px solid var(--panel-border);
-  background: var(--panel);
+  position: absolute; top: 60px; right: 62px; z-index: 5;
+  border-radius: 50%; border: 3px solid #2b3350;
+  background: #0d1120;
+  box-shadow: 0 4px 18px rgba(0,0,0,.5), inset 0 0 0 2px rgba(255,255,255,.06);
+}
+#worldmap { background: #0d1120; }
+.map-inner::before {
+  content: '🗺 World Map'; display: block; color: var(--gold);
+  font-family: 'Press Start 2P', monospace; font-size: 13px; margin-bottom: 10px;
 }
 .map-overlay {
   position: absolute; inset: 0; z-index: 30; background: rgba(5, 7, 14, .8);

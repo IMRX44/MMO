@@ -36,8 +36,9 @@ export function rollRarity(bonus = {}) {
 }
 
 // Roll an item appropriate for a mob of `level`.
-export function rollItem(level, rarityBonus = {}) {
-  const slot = rand(EQUIP_SLOTS);
+// `forcedSlot` pins the slot (crafting recipes); drops roll a random one.
+export function rollItem(level, rarityBonus = {}, forcedSlot = null) {
+  const slot = forcedSlot && EQUIP_SLOTS.includes(forcedSlot) ? forcedSlot : rand(EQUIP_SLOTS);
   const rarity = rollRarity(rarityBonus);
   const mult = RARITIES[rarity].mult;
   const budget = (6 + level * 2.2) * mult;
